@@ -325,7 +325,9 @@ void DcLabInjector::Fire(std::size_t idx)
         std::vector<Position> path;
         for (DcLabJson::Value const& p : a["path"].arr)
             if (p.IsArray() && p.arr.size() >= 3)
-                path.emplace_back(p.arr[0].AsNumber(), p.arr[1].AsNumber(), p.arr[2].AsNumber());
+                path.emplace_back(static_cast<float>(p.arr[0].AsNumber()),
+                                  static_cast<float>(p.arr[1].AsNumber()),
+                                  static_cast<float>(p.arr[2].AsNumber()));
         if (path.empty())
         {
             DcLabScenario::Vec4 const& st = _job.Run()->scenario.start;

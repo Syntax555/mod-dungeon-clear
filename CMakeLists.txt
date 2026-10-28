@@ -58,8 +58,6 @@ AC_ADD_SCRIPT("${CMAKE_CURRENT_LIST_DIR}/src")
 #    UseItemAt event step for the five plagued grain crates — see
 #    Data/DungeonEventRegistry.h.)
 
-AC_ADD_CONFIG_FILE("${CMAKE_CURRENT_LIST_DIR}/conf/mod_dungeon_clear.conf.dist")
-
 # New files added: Action/DcLyceumCloseUpAction.cpp, Util/DcLyceumCloseUpDecision.h
 #   (BRD Lyceum: in a fight inside the room every member stands within 15yd of
 #    the tank — the combat-engine rung that walks a member back, plus the
