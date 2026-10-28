@@ -3,11 +3,16 @@
 **None of this directory is part of the running module.** These scripts are not
 compiled in (`tools/` is deliberately excluded from the CMake source GLOB — see
 `CMakeLists.txt`), are not invoked by any hook, tick, command or config option,
-and are never executed by worldserver. Nothing here can affect a running server
-or a connected client. They are run by hand, by a developer, from a shell.
+and are never executed by worldserver. Developers invoke them from a shell;
+individual tools can write local reports, images, databases or worktrees.
 
-The DB-backed ones open a read-only `mysql` CLI session against `acore_world`
-and issue `SELECT`s only — they write nothing, to the DB or to disk.
+The world-data inspection tools query `acore_world` through the `mysql` CLI.
+Use each script's `--help` for inputs and output files. `dc_analytics.py` writes
+a local SQLite database; converters and rendering tools also write local files.
+
+The [portable earned-play profile](https://github.com/Syntax555/mod-playerbots-portable/blob/main/docs/bot-dungeons.md)
+refuses provisioned test starts/plans and Pull Lab launches. These utilities can
+read existing records; they do not bypass those server guards.
 
 | script | what it does | reads |
 |---|---|---|
