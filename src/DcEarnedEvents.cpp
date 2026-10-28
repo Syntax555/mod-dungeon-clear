@@ -138,6 +138,12 @@ namespace DcEarnedEvents
 
     bool MapAudited(uint32 mapId, std::string& reason)
     {
+        // BFD's native party chains cross unlinked mesh with authored jumps and swims.
+        if (mapId == 48)
+        {
+            reason = "Blackfathom Deeps requires unaudited movement across disconnected navigation mesh";
+            return false;
+        }
         DcDiffKey const normal{false, DUNGEON_DIFFICULTY_NORMAL};
         // Optional encounter controllers can still own the only movement,
         // gossip or pull that advances required progress gates. Refusing

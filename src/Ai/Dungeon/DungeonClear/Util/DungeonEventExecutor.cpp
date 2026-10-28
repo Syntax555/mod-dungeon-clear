@@ -212,6 +212,8 @@ namespace
     // missing mesh; the teleport is the robust fix and is user-sanctioned.)
     void PullStrandedFollowersAcross(Player* leader, float lx, float ly, float lz)
     {
+        if (DcEarnedPlay::Active())
+            return;
         Group* group = leader->GetGroup();
         if (!group)
             return;
@@ -400,6 +402,8 @@ namespace
 
 void DungeonEventExecutor::RelocateParty(Player* bot, AiObjectContext* context, float lx, float ly, float lz)
 {
+    if (DcEarnedPlay::Active())
+        return;
     bot->GetMotionMaster()->Clear();
     bot->NearTeleportTo(lx, ly, lz, bot->GetOrientation());
     PullStrandedFollowersAcross(bot, lx, ly, lz);

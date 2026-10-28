@@ -711,6 +711,8 @@ public:
 
     void OnAllCreatureUpdate(Creature* creature, uint32 /*diff*/) override
     {
+        if (DcEarnedPlay::Active())
+            return;
         if (!creature || creature->GetMapId() != 329 /*Stratholme*/)
             return;
         uint32 const entry = creature->GetEntry();

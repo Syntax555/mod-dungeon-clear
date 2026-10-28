@@ -4,6 +4,7 @@
  */
 
 #include "DcPartyWideChain.h"
+#include "DcEarnedPlay.h"
 
 #include <cmath>
 #include <optional>
@@ -67,6 +68,8 @@ namespace
     bool HandleFall(Player* bot, DungeonEvent const& ev, DcChainState& st, uint32 stepIndex, uint32 now,
                     bool force = false)
     {
+        if (DcEarnedPlay::Active())
+            return false;
         if (!ev.fall.enabled)
             return false;
         if (!force && (!DcPartyWideChain::FallArmed(ev, stepIndex) ||
@@ -290,6 +293,8 @@ DcPartyWideChain::StepOutcome DcPartyWideChain::DriveStep(Player* bot, Playerbot
                                                           DungeonEvent const& ev,
                                                           EventStep const& step, DcChainState& st)
 {
+    if (DcEarnedPlay::Active())
+        return StepOutcome::Stalled;
     if (!bot || !botAI)
         return StepOutcome::Stalled;
     uint32 const now = getMSTime();
@@ -310,6 +315,8 @@ DcPartyWideChain::StepOutcome DcPartyWideChain::DriveStep(Player* bot, Playerbot
 
 bool DcPartyWideChain::DriveFollower(Player* bot, PlayerbotAI* botAI, AiObjectContext* context)
 {
+    if (DcEarnedPlay::Active())
+        return false;
     if (!bot || !botAI || !context || !bot->IsAlive())
         return false;
 

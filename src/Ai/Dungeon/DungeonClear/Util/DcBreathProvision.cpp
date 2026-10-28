@@ -4,6 +4,7 @@
  */
 
 #include "DcBreathProvision.h"
+#include "DcEarnedPlay.h"
 
 #include <cmath>
 #include <string>
@@ -84,6 +85,8 @@ namespace
         Item* elixir = p->GetItemByEntry(DcBreathSource::ITEM_ELIXIR_OF_WATER_BREATHING);
         if (!elixir)
         {
+            if (DcEarnedPlay::Active())
+                return false;
             p->AddItem(DcBreathSource::ITEM_ELIXIR_OF_WATER_BREATHING, 1);
             elixir = p->GetItemByEntry(DcBreathSource::ITEM_ELIXIR_OF_WATER_BREATHING);
             if (!elixir)
@@ -219,6 +222,8 @@ bool DcBreathProvision::AnyBotLacksBreath(Player* bot)
 
 void DcBreathProvision::WatchdogTick(Player* bot)
 {
+    if (DcEarnedPlay::Active())
+        return;
     if (!bot || !DcLeaderSignal::IsDungeonClearLeader(bot))
         return;
     PlayerbotAI* ai = GET_PLAYERBOT_AI(bot);
