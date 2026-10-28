@@ -3,7 +3,7 @@
 This **Dungeon Clear** fork is maintained for
 [AzerothCore Playerbots Portable](https://github.com/Syntax555/mod-playerbots-portable/blob/main/README.md). Its original upstream is
 [jrad7/mod-dungeon-clear](https://github.com/jrad7/mod-dungeon-clear), imported at
-[`fcb680fb279c`](https://github.com/jrad7/mod-dungeon-clear/commit/fcb680fb279cd25696e7f848fad72c5d41282032).
+[`7fb6ebdefb80`](https://github.com/jrad7/mod-dungeon-clear/commit/7fb6ebdefb8038af2676c280214f8a15c843b347).
 The assembly pins a tested commit of this fork's `master` branch in
 [`versions.lock.json`](https://github.com/Syntax555/mod-playerbots-portable/blob/main/versions.lock.json), together with its matching core and modules.
 
@@ -131,7 +131,7 @@ wave set-piece, or cross a break in the navmesh. mod-dungeon-clear performs
 these automatically as part of the normal boss route, with no player input.
 
 Event support currently covers, in classic: Deadmines, Shadowfang Keep, Wailing
-Caverns, Uldaman, Sunken Temple, Razorfen Downs, Scarlet Monastery, Zul'Farrak,
+Caverns, Blackfathom Deeps, Uldaman, Sunken Temple, Razorfen Downs, Scarlet Monastery, Zul'Farrak,
 Blackrock Depths, Upper Blackrock Spire, Scholomance, Stratholme, and Dire
 Maul; and in Burning
 Crusade: Hellfire Ramparts, Blood Furnace, Shattered Halls, Slave Pens,
