@@ -1,0 +1,62 @@
+name: Portable integration
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portable-integration-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration:
+    name: Check earned-progression integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+        working-directory: portable
+    steps:
+      - name: Check out the module under test
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: module
+          persist-credentials: false
+
+      - name: Check out the portable assembly
+        uses: actions/checkout@v7
+        with:
+          repository: Syntax555/mod-playerbots-portable
+          ref: main
+          path: portable
+          persist-credentials: false
+
+      - name: Install native fixture dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y build-essential cmake lua5.1 python3-venv
+          python3 -m venv "$RUNNER_TEMP/gameplay-python"
+          "$RUNNER_TEMP/gameplay-python/bin/python" -m pip install 'PyYAML==6.0.3'
+          echo "$RUNNER_TEMP/gameplay-python/bin" >> "$GITHUB_PATH"
+          lua5.1 -e 'assert(_VERSION == "Lua 5.1")'
+
+      - name: Prepare the assembly’s pinned dependencies
+        run: cmake -P cmake/PrepareModules.cmake
+
+      - name: Use the current module with the pinned assembly
+        run: |
+          set -euo pipefail
+          target=".module-cache/prepared-core/modules/mod-dungeon-clear"
+          rm -rf "$target"
+          mkdir -p "$target"
+          git -C ../module archive HEAD | tar -x -C "$target"
+
+      - name: Test the module’s native integration
+        run: python3 cmake/tests/run_fixtures.py module --module mod-dungeon-clear
