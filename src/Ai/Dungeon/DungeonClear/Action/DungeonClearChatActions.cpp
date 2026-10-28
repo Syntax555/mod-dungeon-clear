@@ -4,6 +4,8 @@
  */
 
 #include "DungeonClearChatActions.h"
+#include "DcEarnedPlay.h"
+#include "EarnedDungeonParties.h"
 #include "Ai/Dungeon/DungeonClear/Util/DcRun.h"
 
 #include <map>
@@ -61,6 +63,8 @@ namespace
 
     bool IsAuthorized(Player* bot, Event const& event)
     {
+        if (EarnedDungeonParties::AuthorizeInternalStart(bot, event))
+            return true;
         Player* owner = const_cast<Event&>(event).getOwner();
         if (!owner)
             return false;
@@ -302,6 +306,15 @@ bool DcOnAction::Execute(Event event)
     if (!bot->GetMap() || !bot->GetMap()->IsDungeon())
     {
         DcRefuse(botAI, bot, "Not in a dungeon.");
+        return false;
+    }
+
+    // A real player in the group may lead a clear wherever the party entered
+    // through the native portal checks. Autonomous parties use audited routes.
+    if (DcEarnedPlay::Active() && EarnedDungeonParties::AuthorizeInternalStart(bot, event) &&
+        !EarnedDungeonParties::RouteEnabled(bot->GetMapId()))
+    {
+        DcRefuse(botAI, bot, "This instance is not an enabled autonomous earned route.");
         return false;
     }
 

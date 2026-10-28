@@ -2049,3 +2049,18 @@ DungeonClear.BgQueueFill.GearQuality = 0
 #
 
 DungeonClear.BgQueueFill.LogoutOnRelease = 1
+
+# Earned parties use only existing nearby random bots and real native paths.
+# Requires Playerbots.NaturalProgression and the strict default IP chain.
+# Groups consist of one tank, one healer, three damage dealers. No transport,
+# equipment, currency, consumable or quest rewards are created by this feature.
+DungeonClear.AutonomousParties.Enable = 0
+DungeonClear.AutonomousParties.MaxConcurrent = 2
+
+# Normal Vanilla, TBC and Wrath dungeons by Dungeon Finder id. Entrance and exit portals,
+# level band and capital faction come from the world data. A dungeon whose
+# required Dungeon Clear objectives need a scripted shortcut or unaudited item
+# acquisition or opening action is skipped and logged. Bot levels follow the dungeon's recommended band,
+# extended upward by LevelSpread (0-10) within its entry range and its expansion's level cap (60/70/80).
+DungeonClear.AutonomousParties.Dungeons = "4,12"
+DungeonClear.AutonomousParties.LevelSpread = 3

@@ -70,20 +70,12 @@ enum class EventStepKind : uint8
     UseItem,                 // leader uses itemId (milestone 2+)
     Wait,                    // dwell `durationMs` then continue
     Custom,                  // escape hatch -> ObjectiveHookRegistry hookId
-    EscortCreature,          // PROTECT a moving NPC (Wailing Caverns' Disciple of
-                             // Naralex) the whole way to its destination: start its
-                             // scripted escort via gossip, then each tick FOLLOW it
-                             // and actively ENGAGE whatever attacks it (mod-playerbots
-                             // gives a bot no threat event when only a non-party
-                             // escortee is hit, so aggro propagation alone never puts
-                             // the tank into the fight). Done only when the final
-                             // boss (`escortDoneEntry` / `escortDoneBit`) exists —
-                             // never on "reached the end". DRIVEN by the action
-                             // (DcObjectiveArriveAction::DriveEscortCreature, which
-                             // owns the follow + threat-engage + self-heal gossip +
-                             // watchdog); RunStep here is the pure completion gate.
-                             // Anchored+Persistent only (the escort spans several
-                             // combat gaps that would rewind a non-persistent event).
+    EscortCreature,          // start an NPC's escort through gossip, follow and protect.
+                             // The audited Naralex driver owns normal movement and
+                             // waits for the native awakening/departure marker.
+                             // Other escorts use DriveEscortCreature's legacy action
+                             // and final-boss/data completion gates; those shortcuts
+                             // remain unavailable under natural progression.
     DropInHole,              // DROP the party down a narrow vertical hole into the
                              // water below (Wailing Caverns' return-fall off Verdan's
                              // shelf to reach the Disciple). A ground move clamps to
@@ -744,17 +736,9 @@ public:
     // alone still ends the step. Chain it right after the step it arms:
     //   .MoveToHoldUntilInstanceData(x, y, z, r, dataId, min).WhileHolding(hook)
     //
-    // For a garrison whose gate can regress BEHIND THE PARTY'S BACK, where the
-    // usual "start it with a Custom step, then hold for the finish" pair silently
-    // stops being true. The Ring of Law is the case it exists for: npc_grimstone's
-    // own 30s "no summon has a victim" watchdog SetData(FAIL)s the arena, which
-    // despawns Grimstone and every wave and puts TYPE_RING_OF_LAW back to
-    // NOT_STARTED. Nothing then restarts it — the Custom step that fired the
-    // areatrigger latched Done minutes ago, and the test-run areatrigger relay is
-    // EDGE-triggered on a volume the party is already standing in — so the hold
-    // burns its whole timeout on an encounter that is no longer running. Re-running
-    // the start hook from inside the hold closes that: it is a no-op while the
-    // encounter is live and re-fires the real trigger once it isn't.
+    // A start step can already be complete when a later garrison's gate resets.
+    // Re-running its hook while holding lets the native encounter retry without
+    // latching completion during the reset or tracking a second restart state.
     EventBuilder& WhileHolding(uint32 hookId);
     EventBuilder& UseGO(uint32 goEntry, float searchRadius = 0.0f,
                         float x = 0.0f, float y = 0.0f, float z = 0.0f);

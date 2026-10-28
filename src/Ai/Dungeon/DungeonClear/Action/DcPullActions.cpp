@@ -3,6 +3,7 @@
  * and/or modify it under version 3 of the License, or (at your option), any later version.
  */
 
+#include "DcEarnedPlay.h"
 #include "DungeonClearActions.h"
 
 #include <algorithm>
@@ -2195,7 +2196,8 @@ bool DungeonClearPullManeuverAction::Execute(Event /*event*/)
     // Keep the tank daze-proof for the whole drag. Immunity (set with pull mode)
     // should stop Daze landing at all; strip it here too as a backstop so a
     // retreat is never slowed to a crawl by a hit from behind.
-    bot->RemoveAurasDueToSpell(1604);
+    if (!DcEarnedPlay::Active())
+        bot->RemoveAurasDueToSpell(1604);
 
     // A druid tank must take the run-home hits in bear form, not caster form.
     // Shapeshift is instant and not interrupted by the drag-back run, so refresh
@@ -2779,7 +2781,7 @@ bool DungeonClearPullManeuverAction::Execute(Event /*event*/)
                 // that (summonWhenStuckBelow) — relocating a boss is a big hammer.
                 BossPullback const* const row =
                     BossPullbackRegistry::Find(bot->GetMapId(), pulled->GetEntry());
-                if (row && row->summonWhenStuckBelow && pulled->IsInWater() &&
+                if (!DcEarnedPlay::Active() && row && row->summonWhenStuckBelow && pulled->IsInWater() &&
                     pulled->GetPositionZ() < camp.GetPositionZ())
                 {
                     // Land him a few yards off the anchor on the tank's side rather

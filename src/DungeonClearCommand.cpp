@@ -34,6 +34,7 @@
 #include "PlayerbotAIConfig.h"
 
 #include "DcModuleEnable.h"
+#include "DcEarnedPlay.h"
 #include "DungeonClearDispatch.h"
 #include "BgQueueFill/DcBgQueueFillManager.h"
 #include "DungeonQueueFill/DcDungeonQueueFillManager.h"
@@ -589,6 +590,11 @@ public:
     {
         if (DcDisabledNotice(handler))
             return true;
+        if (DcEarnedPlay::Active())
+        {
+            handler->SendSysMessage("Provisioned lab runs are unavailable in natural progression.");
+            return true;
+        }
         std::istringstream in(args);
         std::string target, word, sweep;
         uint32 seed = 0, repeat = 1;

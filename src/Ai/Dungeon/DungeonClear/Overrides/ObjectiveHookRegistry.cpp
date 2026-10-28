@@ -3,6 +3,8 @@
  * and/or modify it under version 3 of the License, or (at your option), any later version.
  */
 
+#include "DcEarnedPlay.h"
+#include "DcRingOfLaw.h"
 #include "ObjectiveHookRegistry.h"
 
 #include <atomic>
@@ -18,6 +20,7 @@
 #include "Log.h"
 #include "MotionMaster.h"
 #include "ObjectAccessor.h"
+#include "ObjectMgr.h"
 #include "Opcodes.h"
 #include "ServerFacade.h"
 #include "Player.h"
@@ -40,190 +43,62 @@
 
 namespace
 {
-    // --- Blackrock Depths Ring of Law: EnsureRingStarted (hook id 1) -------
-    // The Ring of Law starts when a party member crosses area trigger 1526 at
-    // the arena centre. Normally that's the human (or a self-bot relayed from
-    // the master). But a bot never autonomously sends CMSG_AREATRIGGER, so an
-    // all-bot party (or a human not on the trigger when the tank arrives) would
-    // never start it. Used as the Ring of Law event's second step (a Custom
-    // step), this fires the REAL trigger from the leader once it's standing on
-    // the spot: the core validates the bot is within the trigger radius and runs
-    // at_ring_of_law for real (which itself honours the 2-minute post-wipe
-    // cooldown and no-ops if already started). Done once the encounter is at
-    // least IN_PROGRESS; Running (and re-fires, harmlessly idempotent) until then.
-    //
-    // It is ALSO the arena's RESTART: the event's garrison step re-runs it every
-    // tick while holding (.WhileHolding, see BlackrockDepthsEvents). The state is
-    // not monotonic — npc_grimstone's 30s "no summon has a victim" watchdog
-    // SetData(FAIL)s back to NOT_STARTED and despawns everything — and this is the
-    // only thing that notices. The re-fire during the core's 2-minute post-fail
-    // cooldown is a no-op it drops on the floor, which is what makes "just fire it
-    // every tick" the right shape here: no cooldown bookkeeping of our own to keep
-    // in step with the core's.
-    constexpr uint32 BRD_TYPE_RING_OF_LAW = 1;  // DataTypes::TYPE_RING_OF_LAW
-    constexpr uint32 BRD_RING_IN_PROGRESS = 1;  // EncounterState::IN_PROGRESS
-    constexpr uint32 BRD_RING_OF_LAW_TRIGGER = 1526;
-
     ObjectiveArriveResult EnsureRingStarted(Player* bot, AiObjectContext* /*context*/,
                                             DungeonBossInfo const& /*info*/)
     {
-        InstanceScript* inst = DcTargeting::GetInstanceScript(bot);
-        if (!inst)
-            return ObjectiveArriveResult::Running;  // not in the instance yet
-
-        // Already running (or DONE) — let the hold step take over.
-        if (inst->GetData(BRD_TYPE_RING_OF_LAW) >= BRD_RING_IN_PROGRESS)
-            return ObjectiveArriveResult::Done;
-
-        // Fire the real area trigger from the leader. Same supported path
-        // ReachAreaTriggerAction uses for a non-teleport trigger; the core
-        // range-checks and runs the at_ring_of_law script.
-        WorldPacket p(CMSG_AREATRIGGER);
-        p << uint32(BRD_RING_OF_LAW_TRIGGER);
-        p.rpos(0);
-        bot->GetSession()->HandleAreaTriggerOpcode(p);
-
-        // Log the fire that TOOK, not every fire: while the encounter refuses to
-        // start (out of the trigger radius, or inside the core's post-fail
-        // cooldown) this runs every tick, and one line per start is the whole
-        // signal — a second one in a run means the arena reset and was restarted.
-        if (inst->GetData(BRD_TYPE_RING_OF_LAW) >= BRD_RING_IN_PROGRESS)
-            LOG_INFO("playerbots.dungeonclear",
-                     "[DC:{}] Ring of Law started by forged areatrigger {} at ({:.1f},{:.1f},{:.1f})",
-                     bot->GetName(), BRD_RING_OF_LAW_TRIGGER, bot->GetPositionX(),
-                     bot->GetPositionY(), bot->GetPositionZ());
-        return ObjectiveArriveResult::Running;
+        return DcRingOfLaw::Run(bot);
     }
 
-    // --- Deadmines Defias Cannon: FireDefiasCannon (hook id 2) ------------
-    // The way to the pirate ship is sealed by the Iron Clad Door (GO 16397,
-    // lock 202 — rogue-pick only, so a bot party can never click it open). A
-    // player loots the Defias Gunpowder chest, then USES the gunpowder on the
-    // Defias Cannon (GO 16398): that casts spell 6250 at the cannon, whose
-    // SmartGameObjectAI (SMART_EVENT_SPELLHIT on 6250) fires the cannon —
-    // opening the door to GO_STATE_ACTIVE_ALTERNATIVE (the GOState enum's
-    // "closed door open by cannon fire"), summoning two Defias Squallshapers,
-    // and setting the cannon instance data.
-    //
-    // Spell 6250 is SPELL_EFFECT_OPEN_LOCK against the cannon, and the cannon's
-    // lock (83) is an ITEM lock requiring the Defias Gunpowder (item 5397) as
-    // the key — so the spell only HITS the cannon (and fires the SmartAI) when
-    // it is cast FROM that item, supplying the cast-item the lock check needs.
-    // A bare CastSpell(6250) with no cast item fails the lock and never hits.
-    //
-    // A bot never loots the chest, so grant it the gunpowder and use the item on
-    // the cannon via the full item-use path. Used as the Deadmines event's
-    // Custom step (DeadminesEvents). The gunpowder has a 2s "Opening" cast, so:
-    //  - if the door is already open, the cannon has fired -> Done (idempotent;
-    //    also covers a re-init after an earlier attempt left the door open, where
-    //    a second fire would summon two more Squallshapers);
-    //  - if the opening cast is already in flight, let it finish (don't re-cast
-    //    and interrupt ourselves every tick);
-    //  - otherwise grant + use the gunpowder. Returns Running; the event's
-    //    door-state gate is what confirms the open and advances.
-    constexpr uint32 DM_GO_CANNON         = 16398;
-    constexpr uint32 DM_GO_IRON_CLAD_DOOR = 16397;
-    constexpr uint32 DM_ITEM_GUNPOWDER    = 5397;  // casts OPEN_LOCK spell 6250
-
-    ObjectiveArriveResult FireDefiasCannon(Player* bot, AiObjectContext* /*context*/,
-                                           DungeonBossInfo const& /*info*/)
-    {
-        // Door already open (state != READY) -> the cannon has fired.
-        if (GameObject* door = bot->FindNearestGameObject(DM_GO_IRON_CLAD_DOOR, 100.0f))
-            if (door->GetGoState() != GO_STATE_READY)
-                return ObjectiveArriveResult::Done;
-
-        // The 2s gunpowder "Opening" cast is already running — let it complete.
-        if (bot->IsNonMeleeSpellCast(false))
-            return ObjectiveArriveResult::Running;
-
-        GameObject* cannon = bot->FindNearestGameObject(DM_GO_CANNON, 40.0f);
-        if (!cannon)
-            return ObjectiveArriveResult::Running;  // not in range yet
-
-        // Grant the gunpowder (bots never looted the chest) and use it on the
-        // cannon: the item is the OPEN_LOCK key, so the spell hits and the
-        // cannon's SmartAI fires.
-        Item* gunpowder = bot->GetItemByEntry(DM_ITEM_GUNPOWDER);
-        if (!gunpowder)
-        {
-            bot->AddItem(DM_ITEM_GUNPOWDER, 1);
-            gunpowder = bot->GetItemByEntry(DM_ITEM_GUNPOWDER);
-            if (!gunpowder)
-                return ObjectiveArriveResult::Running;  // bags full this tick
-        }
-
-        // Feral-form druids can't cast the item spell at all — shift back first
-        // (same gate the barrel plants use). See DcFormGate.
-        DcFormGate::DropBlockingForm(bot, gunpowder);
-        SpellCastTargets targets;
-        targets.SetGOTarget(cannon);
-        bot->CastItemUseSpell(gunpowder, targets, 0, 0);
-        return ObjectiveArriveResult::Running;  // door-state gate confirms it
-    }
-
-    // --- ZulFarrak: WakeZumrah (hook id 5) --------------------------------
-    // Witch Doctor Zum'rah (7271) spawns with creature_template faction 35
-    // (friendly to everyone) — he is NOT flag-gated, so nothing in the engage
-    // path reads him as un-engageable. The ONLY thing that turns him hostile is
-    // area trigger 962 (map 209, centre 1909.27/1015.11/11.5155, radius 10 —
-    // roughly 3yd off his spawn), whose SmartAI row sets his spawn's faction to
-    // 37:
-    //   smart_scripts (962, source_type 2, event 46 ON_TRIGGER) -> SET_FACTION 37
-    //
-    // That row is reachable only from CMSG_AREATRIGGER, which a bot never sends
-    // on its own: mod-playerbots either mirrors the human master's own crossing
-    // (PlayerbotAI's "area trigger" master handler) or fires autonomously but
-    // ONLY for teleport triggers (WithinAreaTrigger / ReachAreaTriggerAction both
-    // bail on !GetAreaTriggerTeleport). AT 962 has no areatrigger_teleport row,
-    // so an all-bot party — every `dc test` run — walks up to a permanently
-    // friendly Zum'rah. The engage gate then loops forever against a live but
-    // unattackable boss and the run deadlocks there.
-    //
-    // The first attempt at this forged CMSG_AREATRIGGER from the leader (the way
-    // EnsureRingStarted starts the Ring of Law) so the genuine SmartAI row would
-    // run. It did NOT work in a live all-bot run — the tank parked on the trigger
-    // and Zum'rah stayed friendly — and no log survived to say which stage failed
-    // (condition, core range check, or SmartAI target resolution). Rather than
-    // spend build cycles bisecting a path with three opaque failure modes, set
-    // the faction the SmartAI row would have set. The row's ONLY action is
-    // SET_FACTION 37 on this spawn, so the end state is identical; what we give
-    // up is going through the script.
-    //
-    // Faction 37 (not "hostile" generically) is exactly what the row applies. His
-    // own "On Reset - Restore faction" row puts him back to 35 after a wipe, and
-    // the repeatable event re-fires — so the reset path still works. Setting the
-    // faction is enough on its own: once hostile his normal aggro takes over and
-    // he pulls the party, no engage nudge required.
-    //
-    // Logged at INFO because this is the one place a ZF deadlock gets fixed
-    // silently; under the test harness a bot-side failure is otherwise invisible
-    // (see the TellError lesson in the test-plan notes).
+    // The native SmartTrigger targets this spawn in the player's own instance.
     constexpr uint32 ZF_ZUMRAH = 7271;
-    constexpr uint32 ZF_ZUMRAH_FACTION_FRIENDLY = 35;  // creature_template default
-    constexpr uint32 ZF_ZUMRAH_FACTION_HOSTILE  = 37;  // what AT 962's row sets
-    // Wide enough to still find him from the trigger spot if he has wandered;
-    // the party is standing on top of him by the time this step runs.
+    constexpr uint32 ZF_ZUMRAH_SPAWN = 81524;
+    constexpr uint32 ZF_ZUMRAH_TRIGGER = 962;
+    constexpr uint32 ZF_ZUMRAH_FACTION_FRIENDLY = 35;
     constexpr float ZF_ZUMRAH_SCAN = 60.0f;
 
-    ObjectiveArriveResult WakeZumrah(Player* bot, AiObjectContext* /*context*/,
+    ObjectiveArriveResult WakeZumrah(Player* bot, AiObjectContext* context,
                                      DungeonBossInfo const& /*info*/)
     {
-        Creature* zumrah = bot->FindNearestCreature(ZF_ZUMRAH, ZF_ZUMRAH_SCAN);
-        if (!zumrah || !zumrah->IsAlive())
-            return ObjectiveArriveResult::Done;  // gone/dead — nothing to wake
+        if (!bot || bot->GetMapId() != 209 || !bot->IsInWorld() ||
+            !GET_PLAYERBOT_AI(bot) || !bot->GetSession() || IsSelfBot(bot))
+            return ObjectiveArriveResult::Blocked;
+        if (!context || !DcRun::Of(context).enabled || DcRun::Of(context).paused)
+            return ObjectiveArriveResult::Running;
 
-        // Already flipped (this fired, or a human crossed the trigger).
-        if (zumrah->GetFaction() != ZF_ZUMRAH_FACTION_FRIENDLY)
+        Creature* zumrah = bot->FindNearestCreature(ZF_ZUMRAH, ZF_ZUMRAH_SCAN, true);
+        if (!zumrah || zumrah->GetSpawnId() != ZF_ZUMRAH_SPAWN)
+            return ObjectiveArriveResult::Running;
+        if (zumrah->IsHostileTo(bot))
             return ObjectiveArriveResult::Done;
+        if (zumrah->GetFaction() != ZF_ZUMRAH_FACTION_FRIENDLY)
+            return ObjectiveArriveResult::Blocked;
 
-        zumrah->SetFaction(ZF_ZUMRAH_FACTION_HOSTILE);
-        LOG_INFO("playerbots.dungeonclear",
-                 "DungeonClear: ZulFarrak — set Zum'rah ({}) faction {} -> {} for {} "
-                 "(area trigger 962 never fires for an all-bot party)",
-                 ZF_ZUMRAH, ZF_ZUMRAH_FACTION_FRIENDLY, ZF_ZUMRAH_FACTION_HOSTILE,
-                 bot->GetName());
-        return ObjectiveArriveResult::Done;
+        AreaTrigger const* trigger = sObjectMgr->GetAreaTrigger(ZF_ZUMRAH_TRIGGER);
+        if (!trigger || trigger->map != 209)
+            return ObjectiveArriveResult::Blocked;
+        if (!bot->IsAlive() || bot->IsInCombat() || bot->IsInFlight() ||
+            bot->IsBeingTeleported() || bot->m_mover != bot ||
+            bot->IsNonMeleeSpellCast(false) || bot->GetLootGUID())
+            return ObjectiveArriveResult::Running;
+
+        if (!bot->IsInAreaTriggerRadius(trigger))
+        {
+            PlayerbotAI* ai = GET_PLAYERBOT_AI(bot);
+            if (!bot->isMoving() && ai->CanMove() &&
+                DcEarnedPlay::ReachableLeg(bot, trigger->x, trigger->y, trigger->z))
+                bot->GetMotionMaster()->MovePoint(0, trigger->x, trigger->y, trigger->z,
+                                                 FORCED_MOVEMENT_NONE, 0.0f, 0.0f,
+                                                 /*generatePath*/ true, false);
+            return ObjectiveArriveResult::Running;
+        }
+
+        DcMovement::StopBot(bot, DcMovement::Stop::Hold);
+        // Same non-teleport path as ReachAreaTriggerAction. The core checks
+        // arrival and owns SmartAI, conditions and faction changes, also on retry.
+        WorldPacket packet(CMSG_AREATRIGGER);
+        packet << uint32(ZF_ZUMRAH_TRIGGER);
+        bot->GetSession()->HandleAreaTriggerOpcode(packet);
+        return ObjectiveArriveResult::Running;
     }
 
     // --- The Arcatraz: DriveMellicharWaves (hook id 6) --------------------
@@ -820,10 +695,9 @@ namespace
             using Reg = ObjectiveHookRegistry;
             Reg::HookTable t;
             Reg::AddHook(t, 1, &EnsureRingStarted);      // BRD Ring of Law — start the arena event
-            Reg::AddHook(t, 2, &FireDefiasCannon);       // Deadmines — fire the cannon, open the door
             Reg::AddHook(t, 3, &GrantIncendiaryBombs);   // Old Hillsbrad — pack of bombs (unlocks Brazen)
             Reg::AddHook(t, 4, &GrantCacheKeyAndLoot);   // The Mechanar — Cache of the Legion key + loot
-            Reg::AddHook(t, 5, &WakeZumrah);             // ZulFarrak — flip Zum'rah hostile (AT 962)
+            Reg::AddHook(t, 5, &WakeZumrah);             // ZulFarrak — walk into Zum'rah's area trigger
             Reg::AddHook(t, 6, &DriveMellicharWaves);    // Arcatraz — poke Mellichar, hold through the waves
             Reg::AddHook(t, 7, &DriveAnzuSummon);        // Sethekk Halls — force-summon Anzu (send-event 14797)
             Reg::AddHook(t, 9, &StartNethekurseIntro);   // Shattered Halls — fire Nethekurse's client-only intro
@@ -890,6 +764,10 @@ ObjectiveArriveResult ObjectiveHookRegistry::Run(uint32 hookId, Player* bot, AiO
 {
     if (hookId == 0)
         return ObjectiveArriveResult::Done;
+    // Hooks script shortcuts (granted items, faction swaps, forced damage and
+    // object states). Only the audited spatial encounter drivers are admitted.
+    if (DcEarnedPlay::Active() && hookId != 1 && hookId != 5)
+        return ObjectiveArriveResult::Blocked;
 
     auto const& hooks = Hooks();
     auto it = hooks.find(hookId);

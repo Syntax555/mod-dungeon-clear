@@ -3,6 +3,8 @@
  * and/or modify it under version 3 of the License, or (at your option), any later version.
  */
 
+#include "DcEarnedEvents.h"
+#include "DcEarnedPlay.h"
 #include "DungeonClearActions.h"
 #include "Ai/Dungeon/DungeonClear/Util/DcRun.h"
 
@@ -2182,8 +2184,8 @@ bool DcObjectiveArriveAction::Execute(Event /*event*/)
             // and the same Yield/Hold pair, as the UseItemOnGO branch below.
             //
             // Only once ARRIVED: while still walking in, the move is the work.
-            // Excluded when the garrison carries a WhileHolding hook (the Ring of
-            // Law): there the hold's per-tick hook is the only thing that notices
+            // Excluded when the garrison carries a WhileHolding hook: there
+            // the hold's per-tick hook is the only thing that notices
             // the encounter resetting behind the party, so it must not be yielded.
             //
             // The raid-muster step (DC_HOOK_RAID_MUSTER) is a camp too, with no
@@ -2267,7 +2269,10 @@ bool DcObjectiveArriveAction::Execute(Event /*event*/)
             // its attackers + self-heal gossip + watchdog) the whole way to the
             // final boss. DriveEscortCreature returns false only once that boss
             // exists, so we fall through to Drive and the completion gate latches.
-            else if (step.kind == EventStepKind::EscortCreature)
+            // Naralex uses the ordinary RunStep driver. Other legacy escorts
+            // remain refused under natural progression.
+            else if (step.kind == EventStepKind::EscortCreature && !DcEarnedPlay::Active() &&
+                     !DcEarnedEvents::IsNaralexStep(step))
             {
                 if (DriveEscortCreature(step, prog))
                     return true;
@@ -2278,7 +2283,7 @@ bool DcObjectiveArriveAction::Execute(Event /*event*/)
             // tick and pin the leader on the lip (the prior attempts' failure).
             // DriveDropInHole returns false once landed, so we fall through to
             // Drive and RunStep's gate pulls the followers down + latches Done.
-            else if (step.kind == EventStepKind::DropInHole)
+            else if (step.kind == EventStepKind::DropInHole && !DcEarnedPlay::Active())
             {
                 if (DriveDropInHole(step))
                     return true;
@@ -2288,7 +2293,8 @@ bool DcObjectiveArriveAction::Execute(Event /*event*/)
             // approach every tick and the tank can't thread a house doorway to a
             // barrel inside (it stalls "close but not inside"). Returns false once in
             // cast range, so we fall through to Drive and RunStep fires the GO.
-            else if (step.kind == EventStepKind::UseItemOnGO)
+            else if (step.kind == EventStepKind::UseItemOnGO && !DcEarnedPlay::Active() &&
+                     !DcEarnedEvents::IsDefiasCannonStep(step))
             {
                 // Recover between barrels. DriveUseItemOnGO owns the tick at
                 // DcRel::AtObjective (30) — above the NeedsRest triggers (26.5) —
@@ -2324,7 +2330,7 @@ bool DcObjectiveArriveAction::Execute(Event /*event*/)
             // step timeout. Recover between crates for the same reason the barrels
             // do: this rung sits above NeedsRest (26.5), the five crates are 330yd
             // apart end to end, and the party has the whole intro RP ahead of it.
-            else if (step.kind == EventStepKind::UseItemAt)
+            else if (step.kind == EventStepKind::UseItemAt && !DcEarnedPlay::Active())
             {
                 switch (EventRestDecision())
                 {
@@ -2728,6 +2734,11 @@ bool DungeonClearDisableOnClearedAction::Execute(Event /*event*/)
 
 bool DungeonClearBreakStuckCombatAction::Execute(Event /*event*/)
 {
+    if (DcEarnedPlay::Active())
+    {
+        DisableDungeonClear(RunOwnerAI(bot, botAI), "Unreachable combat; earned dungeon clear stopped without clearing threat.");
+        return true;
+    }
     // Phantom combat: the trigger has confirmed we've been flagged in combat with
     // nothing fightable for the full StuckCombatTimeout — no holder that is both
     // reachable and actually coming for us. Force-clear it exactly as a GM

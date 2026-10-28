@@ -3,6 +3,7 @@
  * and/or modify it under version 3 of the License, or (at your option), any later version.
  */
 
+#include "DcEarnedPlay.h"
 #include "DungeonQueueFill/DcDungeonQueueFillManager.h"
 
 #include "Group.h"
@@ -60,7 +61,7 @@ std::string DcDungeonQueueFillManager::RefuseReason(Player* player,
     if (transient)
         *transient = false;
 
-    if (!DcModule::IsEnabled())
+    if (!DcModule::IsEnabled() || DcEarnedPlay::Active())
         return "module disabled";
     if (!DcSettings::GetBool(ObjectGuid::Empty, "DungeonQueueFill.Enable"))
         return "DungeonQueueFill.Enable is off";
@@ -357,7 +358,7 @@ void DcDungeonQueueFillManager::Tick(std::uint32_t diff)
 
     // Turning the feature off mid-flight releases what is in flight rather
     // than stranding logged-in bots in a queue nobody is watching.
-    if (!DcModule::IsEnabled() ||
+    if (DcEarnedPlay::Active() || !DcModule::IsEnabled() ||
         !DcSettings::GetBool(ObjectGuid::Empty, "DungeonQueueFill.Enable"))
     {
         _deferred.clear();
@@ -379,7 +380,7 @@ void DcDungeonQueueFillManager::Tick(std::uint32_t diff)
 
 std::string DcDungeonQueueFillManager::StatusText() const
 {
-    bool const on = DcSettings::GetBool(ObjectGuid::Empty, "DungeonQueueFill.Enable");
+    bool const on = !DcEarnedPlay::Active() && DcSettings::GetBool(ObjectGuid::Empty, "DungeonQueueFill.Enable");
     if (!on)
         return "dungeon queue fill is OFF (DungeonClear.DungeonQueueFill.Enable = 0)";
 

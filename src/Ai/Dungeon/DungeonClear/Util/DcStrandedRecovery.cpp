@@ -3,6 +3,7 @@
  * and/or modify it under version 3 of the License, or (at your option), any later version.
  */
 
+#include "DcEarnedPlay.h"
 #include "DcStrandedRecovery.h"
 
 #include "Ai/Dungeon/DungeonClear/Data/Events/DungeonEventTables.h"
@@ -171,7 +172,7 @@ namespace DcStrandedRecovery
 {
     bool Enabled(Player* bot)
     {
-        return DcSettings::GetBool(bot, "StrandedRecovery");
+        return !DcEarnedPlay::Active() && DcSettings::GetBool(bot, "StrandedRecovery");
     }
 
     bool Evaluate(Player* bot)

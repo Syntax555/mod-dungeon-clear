@@ -3,6 +3,7 @@
  * and/or modify it under version 3 of the License, or (at your option), any later version.
  */
 
+#include "DcEarnedPlay.h"
 #include "DcRezRecovery.h"
 
 #include "Ai/Dungeon/DungeonClear/Data/DcNeverTargetRegistry.h"
@@ -568,7 +569,7 @@ namespace DcRezRecovery
 {
     bool Enabled(Player* bot)
     {
-        return DcSettings::GetBool(bot, "PostCombatRez");
+        return !DcEarnedPlay::Active() && DcSettings::GetBool(bot, "PostCombatRez");
     }
 
     SpellInfo const* KnownResurrectSpell(Player const* p)
@@ -787,6 +788,8 @@ namespace DcRezRecovery
 
     bool RegroupAtEntrance(Player* bot)
     {
+        if (DcEarnedPlay::Active())
+            return false;
         if (!bot)
             return false;
         Player* owner = ResolveRunOwner(bot);

@@ -3,6 +3,7 @@
  * and/or modify it under version 3 of the License, or (at your option), any later version.
  */
 
+#include "DcEarnedPlay.h"
 #include "Util/DcDungeonAccess.h"
 
 #include "AreaDefines.h"
@@ -79,7 +80,7 @@ namespace DcDungeonAccess
 
     std::string GrantEntry(Player* bot, std::uint32_t mapId, Difficulty difficulty)
     {
-        if (!bot)
+        if (!bot || DcEarnedPlay::Active())
             return {};
 
         std::string summary;

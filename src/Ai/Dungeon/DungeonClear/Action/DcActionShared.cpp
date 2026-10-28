@@ -75,6 +75,7 @@
 #include "Ai/Dungeon/DungeonClear/Value/DungeonClearStateValues.h"
 #include "Playerbots.h"
 #include "DcActionShared.h"
+#include "DcEarnedPlay.h"
 #include "Ai/Dungeon/DungeonClear/DcValueKeys.h"
 #include "Util/DcPlayerbotsConfig.h"
 
@@ -754,7 +755,7 @@ bool DcMovementAction::DcMoveTo(uint32 mapId, float x, float y, float z, bool id
                                 bool normal_only, bool exact_waypoint, MovementPriority priority,
                                 bool lessDelay, bool backwards, bool ignoreEnemyTargets)
 {
-    if (!DcMovement::DcMovementAllowed(botAI))
+    if (!DcMovement::DcMovementAllowed(botAI) || (DcEarnedPlay::Active() && !botAI->CanMove()))
         return false;
     DcMovement::ResolveEscortConflict(bot);
 
@@ -790,6 +791,17 @@ bool DcMovementAction::DcMoveTo(uint32 mapId, float x, float y, float z, bool id
             destZ = snap.z;
     }
 
+    if (DcEarnedPlay::Active())
+    {
+        if (mapId != bot->GetMapId() || !DcEarnedPlay::ReachableLeg(bot, x, y, destZ))
+        {
+            context->GetValue<std::string&>(DcKey::StallReason)->Get() =
+                "No real navigation-mesh route; earned dungeon clear will not bypass geometry.";
+            return false;
+        }
+        normal_only = true;
+        exact_waypoint = false;
+    }
     bool const moved = DcRawMoveTo(mapId, x, y, destZ, idle, react, normal_only, exact_waypoint,
                                    priority, lessDelay, backwards, ignoreEnemyTargets);
 

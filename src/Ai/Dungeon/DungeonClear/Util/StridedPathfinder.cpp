@@ -4,6 +4,7 @@
  */
 
 #include "StridedPathfinder.h"
+#include "DcEarnedPlay.h"
 
 #include <algorithm>
 #include <cmath>
@@ -134,6 +135,10 @@ namespace
         gen.CalculatePath(cx, cy, cz, px, py, pz, /*forceDest*/ false);
         outType = gen.GetPathType();
 
+        // An unloaded distant tile can produce a straight no-mmap shortcut.
+        // Earned walking must try the existing nearer stride tiers instead.
+        if (DcEarnedPlay::Active() && !DcEarnedPlay::UsesRealPath(gen))
+            return false;
         if (PathTypeIsBogusChunk(outType))
             return false;
 

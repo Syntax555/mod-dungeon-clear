@@ -2,6 +2,7 @@
  * mod-dungeon-clear — StayDeadAction.cpp
  */
 
+#include "DcEarnedPlay.h"
 #include "StayDeadAction.h"
 
 #include "Map.h"
@@ -24,7 +25,7 @@ bool DungeonClearStayDeadAction::isUseful()
     // Read live (not cached) so `.reload config` and per-run overrides both take
     // effect without a restart. The dead-state "auto release" trigger fires on
     // the throttled "often" cadence, so the per-call lookup is negligible.
-    if (DcSettings::GetBool(bot, "PreventBotRelease"))
+    if (!DcEarnedPlay::Active() && DcSettings::GetBool(bot, "PreventBotRelease"))
         return false;  // never auto-release; bot stays a corpse until rezzed
 
     return AutoReleaseSpiritAction::isUseful();

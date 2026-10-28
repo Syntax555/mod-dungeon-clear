@@ -3,6 +3,12 @@
  * and/or modify it under version 3 of the License, or (at your option), any later version.
  */
 
+#include "DcDefiasCannon.h"
+#include "DcEarnedEvents.h"
+#include "DcEarnedPlay.h"
+#include "DcUldamanAltars.h"
+#include "DcNaralexEscort.h"
+#include "DcWailingCaverns.h"
 #include "DungeonEventExecutor.h"
 
 #include <algorithm>
@@ -187,6 +193,10 @@ namespace
     void HopTo(Player* bot, float x, float y, float z)
     {
         if (bot->isMoving())
+            return;
+        // Earned parties walk only where the navigation mesh has a real route;
+        // the step then times out like any other unreachable interaction.
+        if (DcEarnedPlay::Active() && !DcEarnedPlay::ReachableLeg(bot, x, y, z))
             return;
         bot->GetMotionMaster()->MovePoint(0, x, y, z, FORCED_MOVEMENT_NONE, 0.0f, 0.0f,
                                           /*generatePath*/ true, false);
@@ -505,11 +515,18 @@ StepResult DungeonEventExecutor::RunStep(Player* bot, AiObjectContext* context,
 {
     if (!bot)
         return StepResult::Blocked;
+    // Natural progression performs only what an ordinary player could do here.
+    // A refused step fails: optional events are skipped, required ones stall.
+    if (DcEarnedPlay::Active() && !DcEarnedEvents::StepAllowed(step))
+        return StepResult::Failed;
 
     switch (step.kind)
     {
         case EventStepKind::MoveTo:
         {
+            if (bot->GetMapId() == 43)
+                return DcWailingCaverns::RunLeg(bot, context, step);
+
             // Boss-state gate, evaluated BEFORE the walk: an encounter that has
             // finished or reset needs nothing from the garrison spot, and walking
             // back to it first would only delay the retry.
@@ -638,6 +655,9 @@ StepResult DungeonEventExecutor::RunStep(Player* bot, AiObjectContext* context,
 
         case EventStepKind::UseGameObject:
         {
+            if (bot->GetMapId() == 70 && (step.goEntry == 130511 || step.goEntry == 133234))
+                return DcUldamanAltars::Run(bot, step.goEntry);
+
             float const search = step.radius > 0.0f ? step.radius : DC_EVENT_GO_SEARCH;
             GameObject* go = bot->FindNearestGameObject(step.goEntry, search);
             if (!go)
@@ -667,6 +687,25 @@ StepResult DungeonEventExecutor::RunStep(Player* bot, AiObjectContext* context,
                           "— click would be swallowed, holding",
                           bot->GetName(), go->GetGUID().ToString(), go->GetName());
                 return StepResult::Running;
+            }
+            // Earned parties click like a client: their own key or none, within
+            // native interaction range, through the session's opcode handlers.
+            if (DcEarnedPlay::Active())
+            {
+                if ((step.itemId && !bot->HasItemCount(step.itemId, 1)) || !DcEarnedEvents::CanOpen(bot, go))
+                    return StepResult::Failed;
+                if (!go->IsWithinDistInMap(bot, step.reportUse ? INTERACTION_DISTANCE : go->GetInteractionDistance()))
+                {
+                    HopTo(bot, go->GetPositionX(), go->GetPositionY(), go->GetPositionZ());
+                    return StepResult::Running;
+                }
+                WorldPacket packet(step.reportUse ? CMSG_GAMEOBJ_REPORT_USE : CMSG_GAMEOBJ_USE, 8);
+                packet << go->GetGUID();
+                if (step.reportUse)
+                    bot->GetSession()->HandleGameobjectReportUse(packet);
+                else
+                    bot->GetSession()->HandleGameObjectUseOpcode(packet);
+                return StepResult::Done;
             }
             // A GO script that gates on a carried key item refuses a click from an
             // empty bag without a word the headless harness can see (Karazhan's
@@ -909,6 +948,9 @@ StepResult DungeonEventExecutor::RunStep(Player* bot, AiObjectContext* context,
 
         case EventStepKind::EscortCreature:
         {
+            if (bot->GetMapId() == 43 && DcEarnedEvents::IsNaralexStep(step))
+                return DcNaralexEscort::Run(bot, context);
+
             // PURE COMPLETION GATE only. The follow + threat-engage + self-heal
             // gossip + watchdog are all driven by the ACTION
             // (DcObjectiveArriveAction::DriveEscortCreature), which owns the tick
@@ -1144,6 +1186,8 @@ StepResult DungeonEventExecutor::RunStep(Player* bot, AiObjectContext* context,
             if (step.itemId == 0)
                 return StepResult::Done;
             Item* item = bot->GetItemByEntry(step.itemId);
+            if (!item && DcEarnedPlay::Active())
+                return StepResult::Failed;  // only an item the bot earned itself
             if (!item)
             {
                 bot->AddItem(step.itemId, 1);
@@ -1165,6 +1209,9 @@ StepResult DungeonEventExecutor::RunStep(Player* bot, AiObjectContext* context,
 
         case EventStepKind::UseItemOnGO:
         {
+            if (DcEarnedEvents::IsDefiasCannonStep(step))
+                return DcDefiasCannon::Run(bot);
+
             // Plant a bomb on the barrel the step's (x,y,z) anchor sits on. The
             // barrel's only interaction is SMART_EVENT_SPELLHIT of the bomb spell,
             // and that spell (32744) is SPELL_EFFECT_OPEN_LOCK against the barrel's
@@ -1383,11 +1430,10 @@ EventDriveOutcome DungeonEventExecutor::Advance(DungeonEvent const& ev, DungeonE
     EventStep const& step = ev.steps[prog.stepIndex];
     uint32 const timeout = step.timeoutMs ? step.timeoutMs : defaultTimeoutMs;
 
-    // The EscortCreature step has NO flat timeout: a 30s default would mis-fire
-    // during the Disciple's 32.5s banish channel and the long ritual hold. Its
-    // own dead-air watchdog (DriveEscortCreature) owns liveness instead, so the
-    // step is never escalated to Failed here regardless of elapsed time.
-    bool const watchdogOwned = step.kind == EventStepKind::EscortCreature;
+    // Legacy escorts have their action's watchdog. The ordinary Naralex
+    // driver uses its authored finite budget, including all native event phases.
+    bool const watchdogOwned = step.kind == EventStepKind::EscortCreature &&
+                               !DcEarnedEvents::IsNaralexStep(step);
 
     // Forward-progress backstop, checked BEFORE the result dispatch because the
     // wedge it catches never reports Running: a stale-gap rewind loop re-runs an

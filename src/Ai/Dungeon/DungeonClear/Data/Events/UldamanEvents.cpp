@@ -67,18 +67,12 @@ namespace
     constexpr uint32 ULD_ROOM_TIMEOUT = 120000;  // give-up valve on the pre-clear
 
     // --- Altar of the Keepers + Altar of Archaedas (both summoning rituals) --
-    // Both altars are GAMEOBJECT_TYPE_SUMMONING_RITUAL whose completion casts a
-    // SEND_EVENT spell (gameobject_template Data1) on the ritual owner. The
-    // single-participant ritual would otherwise have the bot channel an anim
-    // spell for ~5s; instead each event CASTS that same SEND_EVENT spell on self
-    // (triggered), reproducing the ritual's own completion cast verbatim
-    // (GameObject::Use -> Update: spellCaster->CastSpell(spellCaster, spellId,
-    // true)). Both SEND_EVENT scripts are idempotent and only read the caster's
-    // proximity to the target / the instance state, so the direct cast is safe.
-    constexpr uint32 ULD_STONE_KEEPER       = 4857;    // 4 ring the Keepers altar
-    constexpr uint32 ULD_TEMPLE_DOOR        = 124367;  // Hall of the Keepers exit
-    constexpr uint32 SPELL_AWAKEN_KEEPERS   = 11568;   // Altar of The Keepers (GO 130511)
-    constexpr uint32 SPELL_AWAKEN_ARCHAEDAS = 10340;   // Altar of Archaedas  (GO 133234)
+    // The core owns the ritual channel, participants and delayed SEND_EVENT.
+    // Keep each altar objective active until its native encounter is DONE so
+    // interrupted rituals and encounter resets can retry the ordinary click.
+    constexpr uint32 ULD_KEEPER_ALTAR      = 130511;
+    constexpr uint32 ULD_ARCHAEDAS_ALTAR   = 133234;
+    constexpr uint32 ULD_TEMPLE_DOOR       = 124367;
 
     // Altar of The Keepers (GO 130511) at the Hall-of-the-Keepers centre. The
     // roster delivers the tank here (objective OBJ(1), ordered after Grimlok /
@@ -210,10 +204,6 @@ void RegisterUldamanEvents(std::vector<DungeonEvent>& out)
     // before Archaedas: boss-nav delivers the tank into the hall, this clears the
     // live trash, then fires the altar to awaken the keepers and kills all four;
     // their deaths open the temple door (124367) onward to the Archaedas descent.
-    //
-    // Persistent so the multi-keeper fight (each death chain-wakes the next and
-    // re-enters combat, leaving a >1s drive gap) can't rewind to step 0 and
-    // re-cast the altar / re-walk the approach.
     out.push_back(EventBuilder(70, 2, "Awaken the Stone Keepers (Altar of the Keepers)")
                       .Anchored(/*orderIndex, doc-only*/ 7)
                       // 1) clear the hall's LIVE trash (Stewards / Earthen) first.
@@ -226,37 +216,30 @@ void RegisterUldamanEvents(std::vector<DungeonEvent>& out)
                       .Timeout(ULD_KEEPER_TIMEOUT)
                       // 2) centre on the altar (close the last few yards).
                       .MoveTo(ULD_KEEPER_X, ULD_KEEPER_Y, ULD_KEEPER_Z, /*radius*/ 6.0f)
-                      // 3) fire the altar's ritual SEND_EVENT (11568): wakes the
-                      //    nearest keeper, which "enters combat with the zone" and
-                      //    pulls the party (see the altar comment above for why a
-                      //    direct CastSpell is used instead of UseGO on the ritual).
-                      .CastSpell(SPELL_AWAKEN_KEEPERS)
-                      // 4) kill all four. Each keeper's death chain-wakes the next
-                      //    (SmartAI SetData) and re-pulls the zone, so a plain-gate
-                      //    KillCreature (party auto-aggros; no .engage onto the
-                      //    still-stoned/immune statues) holds the party here until
-                      //    none remain alive.
-                      .KillCreature(ULD_STONE_KEEPER, /*count*/ 4, /*searchRadius*/ 50.0f)
-                      // 5) confirm the temple door has rumbled open before the
-                      //    clear advances (search wide — it sits ~36yd off centre).
+                      // Use the normal ritual and hold through the native keeper
+                      // death chain; a reset leaves this step able to try again.
+                      .UseGO(ULD_KEEPER_ALTAR, 100.0f)
+                      .Timeout(ULD_KEEPER_TIMEOUT)
+                      // Confirm the temple door has rumbled open before the
+                      // clear advances (search wide — it sits ~36yd off centre).
                       .WaitForGOState(ULD_TEMPLE_DOOR, /*GO_STATE_ACTIVE*/ 0,
                                       /*timeout*/ 60000, /*searchRadius*/ 70.0f)
-                      .Persistent()
+                      .StepsOwnMovement()
                       .Build());
 
     // --- Altar of Archaedas (final-boss summon) — ANCHORED -----------------
     // Anchored at OBJ(2) (ordered after the keeper altar, before Archaedas the
     // boss). Archaedas is a roster encounter but spawns stoned/non-attackable;
-    // boss-nav delivers the tank onto the altar, this wakes him, the objective
-    // latches, and the normal boss pull then fights and kills him.
+    // boss-nav delivers the tank onto the altar. The native ritual wakes him
+    // and ordinary combat owns the fight; only his native DONE completes it.
     out.push_back(EventBuilder(70, 3, "Summon Archaedas (Altar of Archaedas)")
                       .Anchored(/*orderIndex, doc-only*/ 8)
                       // 1) step onto the Altar of Archaedas in his chamber.
                       .MoveTo(ULD_ARCH_ALTAR_X, ULD_ARCH_ALTAR_Y, ULD_ARCH_ALTAR_Z,
                               /*radius*/ 6.0f)
-                      // 2) fire the altar's ritual SEND_EVENT (10340): sets
-                      //    DATA_ARCHAEDAS=IN_PROGRESS and wakes the stoned boss.
-                      .CastSpell(SPELL_AWAKEN_ARCHAEDAS)
+                      .UseGO(ULD_ARCHAEDAS_ALTAR, 100.0f)
+                      .Timeout(180000)
+                      .StepsOwnMovement()
                       .Build());
 }
 

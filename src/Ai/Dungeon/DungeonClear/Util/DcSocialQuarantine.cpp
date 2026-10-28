@@ -4,6 +4,7 @@
  */
 
 #include "DcSocialQuarantine.h"
+#include "DcEarnedPlay.h"
 
 #include "Ai/Dungeon/DungeonClear/Data/DcSocialQuarantineRegistry.h"
 #include "Ai/Dungeon/DungeonClear/Data/DungeonBossInfo.h"
@@ -86,6 +87,8 @@ namespace DcSocialQuarantine
 {
     void Update(Player* bot, AiObjectContext* context)
     {
+        if (DcEarnedPlay::Active())
+            return;
         if (!bot || !context)
             return;
 

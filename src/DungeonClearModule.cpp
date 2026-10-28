@@ -50,6 +50,8 @@
  */
 
 #include "ScriptMgr.h"
+#include "EarnedDungeonParties.h"
+#include "DcEarnedPlay.h"
 #include "AllCreatureScript.h"
 #include "Cell.h"
 #include "CellImpl.h"
@@ -285,6 +287,7 @@ public:
     void OnAfterConfigLoad(bool /*reload*/) override
     {
         DcSettings::InvalidateConfCache();
+        EarnedDungeonParties::LoadConfig();
         // The one tunable a reload CANNOT apply: say so rather than leaving an
         // admin to wonder why the module is still running (or still absent).
         DcModule::WarnIfConfDiffersFromLatch();
@@ -560,6 +563,7 @@ public:
         // put passive — it must hand back when the module goes off.
         DcLyceum::Tick(diff, DcModule::IsEnabled());
 
+        EarnedDungeonParties::Update(diff);
         if (!DcModule::IsEnabled())
             return;
 
@@ -588,7 +592,8 @@ public:
         // bots on the COMBAT engine, where the clear's non-combat triggers never
         // get one. Internally throttled and gated on the map having a row, so it
         // is a handful of integer compares on every other map.
-        DcCombatPurge::Tick(diff);
+        if (!DcEarnedPlay::Active())
+            DcCombatPurge::Tick(diff);
 
         // `.dc test` harness state machine (spawn -> gear -> group -> teleport
         // -> dc on -> watchdogs -> record). Cheap no-op while no test run is
@@ -596,12 +601,15 @@ public:
         // Headless-driver login poll first (a console start may be waiting on
         // it), then the plan scheduler (a launch it makes this tick enters the
         // run manager's tick loop immediately below).
-        DcTestDriver::Tick();
-        DcTestPlanManager::Instance().Tick(diff);
-        DcTestRunManager::Instance().Tick(diff);
-        // Pull Lab scheduler: launches warm lab parties through the run
-        // manager above (they tick there); this only fills free capacity.
-        DcLabManager::Instance().Tick(diff);
+        if (!DcEarnedPlay::Active())
+        {
+            DcTestDriver::Tick();
+            DcTestPlanManager::Instance().Tick(diff);
+            DcTestRunManager::Instance().Tick(diff);
+            // Pull Lab scheduler: launches warm lab parties through the run
+            // manager above (they tick there); this only fills free capacity.
+            DcLabManager::Instance().Tick(diff);
+        }
 
         // Dungeon-gate correctness net: re-assert "DC strategies installed iff in
         // a dungeon" across all bots on a throttled cadence. The login and

@@ -3,6 +3,7 @@
  * and/or modify it under version 3 of the License, or (at your option), any later version.
  */
 
+#include "DcEarnedPlay.h"
 #include "BgQueueFill/DcBgQueueFillManager.h"
 
 #include <algorithm>
@@ -103,7 +104,7 @@ std::string DcBgQueueFillManager::RefuseReason(Player* player, std::uint8_t aren
     if (transient)
         *transient = false;
 
-    if (!DcModule::IsEnabled())
+    if (!DcModule::IsEnabled() || DcEarnedPlay::Active())
         return "module disabled";
     if (!DcSettings::GetBool(ObjectGuid::Empty, "BgQueueFill.Enable"))
         return "BgQueueFill.Enable is off";
@@ -533,7 +534,7 @@ void DcBgQueueFillManager::Tick(std::uint32_t diff)
     if (_jobs.empty() && _deferred.empty() && _pending.empty() && _configChecked)
         return;
 
-    bool const on = DcModule::IsEnabled() && DcSettings::GetBool(ObjectGuid::Empty, "BgQueueFill.Enable");
+    bool const on = !DcEarnedPlay::Active() && DcModule::IsEnabled() && DcSettings::GetBool(ObjectGuid::Empty, "BgQueueFill.Enable");
 
     // Once, the first tick the feature is on — the playerbots config is
     // certainly loaded by then, which it may not be at script registration.

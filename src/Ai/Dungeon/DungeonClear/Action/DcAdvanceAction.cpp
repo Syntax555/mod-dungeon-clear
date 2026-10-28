@@ -4,6 +4,7 @@
  */
 
 #include "DungeonClearActions.h"
+#include "DcEarnedPlay.h"
 #include "Ai/Dungeon/DungeonClear/Util/DcRun.h"
 
 #include <algorithm>
@@ -304,6 +305,8 @@ namespace
     // the offsets looked recoverable; caller stalls normally.
     bool TryFarFromPolyRecovery(Player* bot)
     {
+        if (DcEarnedPlay::Active())
+            return false;
         if (!bot)
             return false;
         // No navmesh to land on: on a map the core runs without pathfinding

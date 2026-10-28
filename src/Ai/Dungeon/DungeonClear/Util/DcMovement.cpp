@@ -4,6 +4,7 @@
  */
 
 #include "Ai/Dungeon/DungeonClear/Util/DcMovement.h"
+#include "DcEarnedPlay.h"
 #include "Ai/Dungeon/DungeonClear/Util/DcPbCompat.h"
 #include "Ai/Dungeon/DungeonClear/Util/DcRun.h"
 
@@ -178,7 +179,7 @@ namespace DcMovement
         // pause-walks-through-door race class at the mechanism (a mid-tick flip of
         // "dungeon clear paused" can no longer launch a fresh escort glide) for every
         // future caller, instead of by hand-pasted convention.
-        if (!DcMovementAllowed(botAI))
+        if (!DcMovementAllowed(botAI) || (DcEarnedPlay::Active() && !botAI->CanMove()))
             return false;
         Player* bot = botAI->GetBot();
         if (!bot || pts.size() < 2)
@@ -186,6 +187,14 @@ namespace DcMovement
         MotionMaster* mm = bot->GetMotionMaster();
         if (!mm)
             return false;
+        if (DcEarnedPlay::Active() && !DcEarnedPlay::RealSpline(bot, pts))
+        {
+            botAI->GetAiObjectContext()->GetValue<std::string&>(DcKey::StallReason)->Get() =
+                "No real navigation-mesh route; earned dungeon clear will not bypass geometry.";
+            return false;
+        }
+        if (DcEarnedPlay::Active())
+            DcEarnedPlay::MatchSwimming(bot, pts);
 
         if (bot->IsSitState())
             bot->SetStandState(UNIT_STAND_STATE_STAND);

@@ -3,6 +3,7 @@
  */
 
 #include "BetterLootRollAction.h"
+#include "DcEarnedPlay.h"
 
 #include <utility>
 #include <vector>
@@ -92,6 +93,8 @@ bool DcLootRoll::IsVotablePendingRoll(Roll const* roll, Player* bot)
 
 bool DungeonClearBetterLootRollAction::isUseful()
 {
+    if (DcEarnedPlay::Active())
+        return LootRollAction::isUseful();
     // Only intercept self-bots (master == bot). A bot driven for a separate
     // human master keeps stock rolling — its vote is its own GUID, no conflict.
     if (DcPlayerbotCompat::IsSelfBot(bot) && DcSettings::GetBool(bot, "BetterLootRolling"))
@@ -102,7 +105,7 @@ bool DungeonClearBetterLootRollAction::isUseful()
 
 bool DungeonClearBetterLootRollAction::Execute(Event event)
 {
-    if (!DcSettings::GetBool(bot, "BetterLootRolling"))
+    if (DcEarnedPlay::Active() || !DcSettings::GetBool(bot, "BetterLootRolling"))
         return LootRollAction::Execute(event);
 
     // The self-bot suppression isUseful() already applies, repeated here

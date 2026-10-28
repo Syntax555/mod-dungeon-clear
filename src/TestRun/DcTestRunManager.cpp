@@ -3,6 +3,7 @@
  * and/or modify it under version 3 of the License, or (at your option), any later version.
  */
 
+#include "DcEarnedPlay.h"
 #include "TestRun/DcTestRunManager.h"
 
 #include <ctime>
@@ -60,6 +61,9 @@ bool DcTestRunManager::Start(Player* gm, std::string const& dungeonToken,
             *errOut = kind;
         return false;
     };
+
+    if (DcEarnedPlay::Active())
+        return fail(StartErr::UnknownDungeon, "provisioned test runs are unavailable in natural progression");
 
     DcTestDungeonRegistry::Row const* row = DcTestDungeonRegistry::Find(dungeonToken);
     if (!row)
@@ -191,6 +195,9 @@ bool DcTestRunManager::StartRoster(Player* gm, std::string const& dungeonToken,
             *errOut = kind;
         return false;
     };
+
+    if (DcEarnedPlay::Active())
+        return fail(StartErr::UnknownDungeon, "provisioned test runs are unavailable in natural progression");
 
     DcTestDungeonRegistry::Row const* row = DcTestDungeonRegistry::Find(dungeonToken);
     if (!row)

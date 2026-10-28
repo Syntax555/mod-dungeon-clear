@@ -4,6 +4,7 @@
  */
 
 #include "DcLeaderSignal.h"
+#include "DcEarnedPlay.h"
 
 #include "DungeonClearUtil.h"   // DC_PULL_* log macros
 #include "DungeonClearMath.h"
@@ -1500,7 +1501,7 @@ void DcLeaderSignal::SetLeaderDazeImmunity(Player* leader, bool apply)
     // creatures apply). spellId 0 = a blanket mechanic block. Pair add/remove
     // exactly: remove first so a re-apply never stacks duplicate entries.
     leader->ApplySpellImmune(0, IMMUNITY_MECHANIC, MECHANIC_DAZE, false);
-    if (apply)
+    if (apply && !DcEarnedPlay::Active())
     {
         leader->ApplySpellImmune(0, IMMUNITY_MECHANIC, MECHANIC_DAZE, true);
         // Immunity only blocks FUTURE applications; clear any Daze already on

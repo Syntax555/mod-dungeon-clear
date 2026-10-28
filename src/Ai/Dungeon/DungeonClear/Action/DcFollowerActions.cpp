@@ -4,6 +4,10 @@
  */
 
 #include "DungeonClearActions.h"
+#include "DcEarnedPlay.h"
+#include "DcRingOfLaw.h"
+#include "DcNaralexEscort.h"
+#include "DcWailingCaverns.h"
 
 #include <algorithm>
 #include <cmath>
@@ -339,6 +343,14 @@ bool DungeonClearFollowTankAction::Execute(Event /*event*/)
     else
     {
         lootYieldStart = 0;  // not looting -> reset the commit timer
+    }
+
+    if (DcWailingCaverns::FollowRoute(bot, tank) ||
+        DcNaralexEscort::Follow(bot, tank) || DcRingOfLaw::Follow(bot, tank))
+    {
+        followedTank = tank->GetGUID();
+        DcFollowerLifecycle::MarkFollowing(bot->GetGUID());
+        return true;
     }
 
     // A transit is driving the column to a published cursor: every branch below
@@ -772,6 +784,18 @@ bool DungeonClearFollowTankAction::Execute(Event /*event*/)
                 if (gref->GetSource() && gref->GetSource()->GetMapId() == bot->GetMapId())
                     ++sameMap;
         followDist = std::max(followDist, DcFormation::RingRadius(sameMap, followDist));
+    }
+    if (DcEarnedPlay::Active())
+    {
+        // A persistent native MoveFollow replans independently and can fall
+        // back to a straight path on missing mesh. Resolve this formation slot
+        // through the earned movement boundary on every issued point move.
+        if (MotionMaster* motion = bot->GetMotionMaster())
+            if (motion->GetMotionSlotType(MOTION_SLOT_ACTIVE) == FOLLOW_MOTION_TYPE)
+                motion->Clear();
+        Position const slot = tank->GetFirstCollisionPosition(followDist, angle);
+        return DcMoveTo(tank->GetMapId(), slot.GetPositionX(), slot.GetPositionY(), slot.GetPositionZ(),
+                        false, false, /*normal_only*/ true, /*exact_waypoint*/ false);
     }
     return Follow(tank, followDist, angle);
 }
