@@ -4,7 +4,7 @@ This **Dungeon Clear** fork is maintained for
 [AzerothCore Playerbots Portable](https://github.com/Syntax555/mod-playerbots-portable/blob/main/README.md). Its original upstream is
 [jrad7/mod-dungeon-clear](https://github.com/jrad7/mod-dungeon-clear), imported at
 [`fcb680fb279c`](https://github.com/jrad7/mod-dungeon-clear/commit/fcb680fb279cd25696e7f848fad72c5d41282032).
-The assembly pins a tested commit of this fork's `main` branch in
+The assembly pins a tested commit of this fork's `master` branch in
 [`versions.lock.json`](https://github.com/Syntax555/mod-playerbots-portable/blob/main/versions.lock.json), together with its matching core and modules.
 
 Use the assembly's [installation and build instructions](https://github.com/Syntax555/mod-playerbots-portable/blob/main/README.md),
