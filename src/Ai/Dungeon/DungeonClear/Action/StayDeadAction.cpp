@@ -8,6 +8,7 @@
 #include "Map.h"
 #include "Player.h"
 #include "Ai/Dungeon/DungeonClear/Settings/DcSettings.h"
+#include "Ai/Dungeon/DungeonClear/Util/DcRezRecovery.h"
 
 bool DungeonClearStayDeadAction::isUseful()
 {
@@ -25,8 +26,15 @@ bool DungeonClearStayDeadAction::isUseful()
     // Read live (not cached) so `.reload config` and per-run overrides both take
     // effect without a restart. The dead-state "auto release" trigger fires on
     // the throttled "often" cadence, so the per-call lookup is negligible.
-    if (!DcEarnedPlay::Active() && DcSettings::GetBool(bot, "PreventBotRelease"))
-        return false;  // never auto-release; bot stays a corpse until rezzed
+    if (DcSettings::GetBool(bot, "PreventBotRelease"))
+    {
+        if (!DcEarnedPlay::Active())
+            return false;  // never auto-release; bot stays a corpse until rezzed
+        // Earned play releases as a player would: the body waits only while the
+        // party can still raise it, otherwise the bot runs back to it.
+        if (DcRezRecovery::KeepsCorpse(bot))
+            return false;
+    }
 
     return AutoReleaseSpiritAction::isUseful();
 }

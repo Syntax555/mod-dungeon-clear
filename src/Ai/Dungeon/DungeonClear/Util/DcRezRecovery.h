@@ -80,6 +80,12 @@ namespace DcRezRecovery
     // Disable/Disabled so the party-died trigger keeps its classic behavior.
     Plan Evaluate(Player* bot);
 
+    // Should this dead member stay a corpse? True while a resurrection is coming
+    // (any Hold) or the run carries on beside a body it raises later (the two
+    // stand-downs). A body no one can raise is released for the corpse run.
+    // Read-only, like IsElectedRezzer.
+    bool KeepsCorpse(Player* dead);
+
     // Cheap hold-gate read for the leader's readiness sites (between-pulls,
     // event rest): true while the run should hold for a recovery — feature on,
     // run enabled+unpaused, and any same-map group member dead. Deliberately

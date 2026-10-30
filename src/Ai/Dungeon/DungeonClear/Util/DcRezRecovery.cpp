@@ -13,6 +13,7 @@
 #include "Ai/Dungeon/DungeonClear/Settings/DcSettings.h"
 #include "Ai/Dungeon/DungeonClear/Util/DcCombatFlag.h"
 #include "Ai/Dungeon/DungeonClear/Util/DcLeaderSignal.h"
+#include "Ai/Dungeon/DungeonClear/Util/DcPartyState.h"
 #include "Ai/Dungeon/DungeonClear/Util/DcRun.h"
 #include "Ai/Dungeon/DungeonClear/Util/DcRunWing.h"
 #include "Ai/Dungeon/DungeonClear/Util/DcStatusPublisher.h"
@@ -292,7 +293,13 @@ namespace
 
         if (!anyDead)
         {
-            if (mutate && (run.rezPendingSinceMs || run.rezAnnounceMs))
+            // Members who released are still running back to their bodies here: the
+            // episode and its "restored" line wait for them, but no recovery clock
+            // runs while nobody lies here to raise.
+            bool const runningBack = DcPartyState::AnyMemberReleasedHere(bot);
+            if (mutate && runningBack)
+                run.rezPendingSinceMs = 0;
+            else if (mutate && (run.rezPendingSinceMs || run.rezAnnounceMs))
             {
                 // A recovery episode just completed — everyone is back up. The
                 // rezzed member's low HP/mana now holds the tank via the
@@ -465,6 +472,7 @@ namespace
         in.rezBlocked = rezBlocked;
         in.blockedSinceMs = run.rezBlockedSinceMs;
         in.blockedHoldMaxMs = DC_REZ_BLOCKED_HOLD_MAX_MS;
+        in.corpseRunWhenUnrecoverable = DcEarnedPlay::Active();
 
         plan.verdict = DcRezDecision::Decide(in, members);
 
@@ -545,9 +553,12 @@ namespace
                        std::to_string(in.timeoutMs / 1000) + "s).";
             else if (plan.verdict.reason == DcRezDecision::Reason::NoRezzerInFight)
                 // No rezzer elected — there is none left. The hold is only until the
-                // fight ends, at which point the verdict becomes the classic disable.
-                line = plan.targetName + " died and no one left can resurrect \xe2\x80\x94 "
-                       "finishing this fight first.";
+                // fight ends, at which point the verdict becomes the classic disable
+                // or, under earned play, the corpse run.
+                line = plan.targetName + " died and no one left can resurrect \xe2\x80\x94 " +
+                       (DcRezDecision::CorpseRunOrDisable(in, members) == DcRezDecision::Outcome::None
+                            ? "they will run back after this fight."
+                            : "finishing this fight first.");
             else
                 line = plan.targetName + " died \xe2\x80\x94 " + plan.rezzerName +
                        " is coming to resurrect them.";
@@ -570,7 +581,7 @@ namespace DcRezRecovery
 {
     bool Enabled(Player* bot)
     {
-        return !DcEarnedPlay::Active() && DcSettings::GetBool(bot, "PostCombatRez");
+        return DcSettings::GetBool(bot, "PostCombatRez");
     }
 
     SpellInfo const* KnownResurrectSpell(Player const* p)
@@ -643,6 +654,14 @@ namespace DcRezRecovery
     Plan Evaluate(Player* bot)
     {
         return EvaluateImpl(bot, /*mutate*/ true);
+    }
+
+    bool KeepsCorpse(Player* dead)
+    {
+        Plan const plan = EvaluateImpl(dead, /*mutate*/ false);
+        return plan.verdict.outcome == DcRezDecision::Outcome::Hold ||
+               plan.verdict.reason == DcRezDecision::Reason::BlockedStandDown ||
+               plan.verdict.reason == DcRezDecision::Reason::UnsafeStandDown;
     }
 
     bool IsPending(Player* leaderTank)

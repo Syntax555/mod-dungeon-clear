@@ -17,7 +17,9 @@
  *
  * Gated by the config flag DungeonClear.PreventBotRelease (default on). When the
  * flag is off — or the bot is not on a dungeon/raid map — this behaves exactly
- * like the stock AutoReleaseSpiritAction.
+ * like the stock AutoReleaseSpiritAction. Under earned play the body waits only
+ * while the party can still raise it (DcRezRecovery::KeepsCorpse); otherwise the
+ * bot releases and runs back like a player.
  *
  * NOTE: this only suppresses the routine spirit-release. The DeadStrategy's
  * anti-stuck "repop" paths (falling far / location stuck) are intentionally left

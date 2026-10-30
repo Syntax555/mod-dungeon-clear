@@ -153,9 +153,10 @@ bool DcPartyState::IsPartyReady(Player* bot, float minHpPct, float minMpPct, flo
         Player* member = ref->GetSource();
         if (!member)
             continue;
-        if (member->GetMapId() != bot->GetMapId())
+        bool const released = IsReleasedHere(member, bot);
+        if (member->GetMapId() != bot->GetMapId() && !released)
             continue;
-        if (member->isDead())
+        if (member->isDead() && !released)
             continue;  // Dead members hold the run via DcRezRecovery::IsPending
                        // (or, with PostCombatRez off / recovery unviable, the
                        // party-died bailout) — never via these readiness floors.
@@ -163,7 +164,7 @@ bool DcPartyState::IsPartyReady(Player* bot, float minHpPct, float minMpPct, flo
                        // living-but-low member and the floors hold the tank
                        // while they eat/drink back up.
 
-        bool const ok = memberMeetsBars(member);
+        bool const ok = !released && memberMeetsBars(member);
         if (!raid)
         {
             if (!ok)
@@ -514,6 +515,23 @@ bool DcPartyState::HasDeadSameMapMember(Player* bot)
     return false;
 }
 
+bool DcPartyState::IsReleasedHere(Player const* member, Player const* bot)
+{
+    return member && bot && member->GetMapId() != bot->GetMapId() && member->isDead() &&
+           member->HasCorpse() && member->GetCorpseLocation().GetMapId() == bot->GetMapId();
+}
+
+bool DcPartyState::AnyMemberReleasedHere(Player* bot)
+{
+    Group* group = bot ? bot->GetGroup() : nullptr;
+    if (!group)
+        return false;
+    for (GroupReference* ref = group->GetFirstMember(); ref; ref = ref->next())
+        if (IsReleasedHere(ref->GetSource(), bot))
+            return true;
+    return false;
+}
+
 bool DcPartyState::IsAnyPartyMemberLooting(Player* bot)
 {
     if (!bot)
@@ -567,9 +585,10 @@ std::string DcPartyState::DescribePartyNotReady(Player* bot,
         Player* member = ref->GetSource();
         if (!member)
             continue;
-        if (member->GetMapId() != bot->GetMapId())
+        bool const released = IsReleasedHere(member, bot);
+        if (member->GetMapId() != bot->GetMapId() && !released)
             continue;
-        if (member->isDead())
+        if (member->isDead() && !released)
             continue;  // Dead members are the rez recovery's to report, not a
                        // readiness reason (mirrors IsPartyReady's skip).
 
@@ -577,7 +596,9 @@ std::string DcPartyState::DescribePartyNotReady(Player* bot,
         // matters only for which single reason we surface first; distance reads
         // most intuitively, then health, then mana.
         std::string reason;
-        if (member != bot &&
+        if (released)
+            reason = "running back";
+        else if (member != bot &&
             ((spreadAnchor ? member->GetDistance(*spreadAnchor)
                            : bot->GetDistance(member)) > maxSpread ||
              (maxTankGap > 0.0f && bot->GetDistance(member) > maxTankGap)))

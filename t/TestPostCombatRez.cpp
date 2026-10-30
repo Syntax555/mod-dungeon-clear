@@ -714,3 +714,71 @@ TEST(DcRezDecisionTest, ABlockOverTheLeadersCorpseHoldsPastTheWait)
     EXPECT_EQ(lifted.reason, Reason::Recovering);
     EXPECT_EQ(lifted.targetIdx, 0);
 }
+
+// ---- earned play: the dead run back ----------------------------------------------
+//
+// Under earned play bots release as players do, so a corpse no one can raise is a
+// walk back from the graveyard while the party waits, not the end of the run. A wipe
+// and the leader's own corpse still end it.
+
+TEST(DcRezDecisionTest, EarnedPlayRunsBackWhenNoRezzerIsLeft)
+{
+    // A warrior leader survives; the only living rez class, the healer, is a corpse.
+    auto party = BaseParty();
+    party[0].canRezClass = false;
+    party[0].isLeader = true;
+    party[1].isDead = true;
+    party[2].isDead = true;
+    Inputs in = BaseInputs();
+    EXPECT_EQ(Decide(in, party).outcome, Outcome::Disable);
+    in.corpseRunWhenUnrecoverable = true;
+    Result const r = Decide(in, party);
+    EXPECT_EQ(r.outcome, Outcome::None);
+    EXPECT_EQ(r.reason, Reason::NoRezzer);
+}
+
+TEST(DcRezDecisionTest, EarnedPlayRunsBackWhenTheRezTimesOut)
+{
+    auto party = BaseParty();
+    party[2].isDead = true;
+    Inputs in = BaseInputs();
+    in.corpseRunWhenUnrecoverable = true;
+    in.pendingSinceMs = 1000;
+    in.nowMs = 1000 + in.timeoutMs;
+    Result const r = Decide(in, party);
+    EXPECT_EQ(r.outcome, Outcome::None);
+    EXPECT_EQ(r.reason, Reason::TimedOut);
+}
+
+TEST(DcRezDecisionTest, EarnedPlayStillHoldsWhileARezzerIsComing)
+{
+    auto party = BaseParty();
+    party[2].isDead = true;
+    Inputs in = BaseInputs();
+    in.corpseRunWhenUnrecoverable = true;
+    Result const r = Decide(in, party);
+    EXPECT_EQ(r.outcome, Outcome::Hold);
+    EXPECT_EQ(r.reason, Reason::Recovering);
+    EXPECT_EQ(r.rezzerIdx, 1);
+}
+
+TEST(DcRezDecisionTest, EarnedPlayStillEndsTheRunOnAWipeOrTheLeadersCorpse)
+{
+    Inputs in = BaseInputs();
+    in.corpseRunWhenUnrecoverable = true;
+    auto wipe = BaseParty();
+    for (Member& m : wipe)
+        m.isDead = true;
+    Result const wiped = Decide(in, wipe);
+    EXPECT_EQ(wiped.outcome, Outcome::Disable);
+    EXPECT_EQ(wiped.reason, Reason::Wipe);
+
+    // The leader drives the run, so its body is never left behind for a run back.
+    auto leader = BaseParty();
+    leader[0].isLeader = true;
+    leader[0].isDead = true;
+    leader[1].isDead = true;
+    Result const r = Decide(in, leader);
+    EXPECT_EQ(r.outcome, Outcome::Disable);
+    EXPECT_EQ(r.reason, Reason::NoRezzer);
+}

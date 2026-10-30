@@ -187,6 +187,11 @@ public:
     // deadlock the run through this.
     static bool HasDeadSameMapMember(Player* bot);
 
+    // A member who released and is running back to a body on the bot's map.
+    // The readiness walks wait for them like any member who is not ready.
+    static bool IsReleasedHere(Player const* member, Player const* bot);
+    static bool AnyMemberReleasedHere(Player* bot);
+
     // Returns true if any LIVING bot party member on the bot's map (excluding
     // `bot` itself) currently has a corpse it intends to loot — in any phase,
     // walking in (has available loot) or within reach (can loot). Reads each

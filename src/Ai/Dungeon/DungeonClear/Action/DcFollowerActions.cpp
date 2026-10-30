@@ -2332,6 +2332,9 @@ bool DungeonClearRezPartyAction::Execute(Event /*event*/)
     // ours, and we are already standing here every tick waiting on it.
     if (target->isResurrectRequestedBy(bot->GetGUID()))
     {
+        // A player answers the offer from their own client.
+        if (!GET_PLAYERBOT_AI(target))
+            return true;
         LOG_INFO("playerbots.dungeonclear",
                  "[DC:{}] rez party: {} has our resurrect offer standing — accepting it "
                  "for them (a bot has no client to answer the prompt)",

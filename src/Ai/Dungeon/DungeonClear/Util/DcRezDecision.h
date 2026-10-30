@@ -127,12 +127,19 @@ namespace DcRezDecision
         bool          rezBlocked = false;
         std::uint32_t blockedSinceMs = 0;    // getMSTime() the block was first seen
         std::uint32_t blockedHoldMaxMs = 0;  // hold this long for it to lift; 0 = don't
+
+        // --- earned play: the dead run back --------------------------------------
+        // Bots release as players do, so a corpse no one is left to raise is a corpse
+        // run, not a lost run: the dead walk back from the graveyard and the party
+        // waits for them. Never over the leader's corpse, which drives the run.
+        bool          corpseRunWhenUnrecoverable = false;
     };
 
     enum class Outcome
     {
-        None,     // no deaths, the feature is disabled (the glue converts), or the
-                  // instance forbids the spell and the run carries on short-handed
+        None,     // no deaths, the feature is disabled (the glue converts), the
+                  // instance forbids the spell and the run carries on short-handed,
+                  // or (corpseRunWhenUnrecoverable) the dead run back
         Hold,     // suppress the bailout; recovery is in progress
         Disable,  // recovery not viable — run the classic disable funnel
         Regroup   // raid wipe — revive at the instance entrance and continue
@@ -152,6 +159,14 @@ namespace DcRezDecision
         BlockedStandDown, // ...it did not lift; carry on short-handed, do not disable
         UnsafeStandDown   // every corpse lies among idle hostiles; carry on short-handed
     };
+
+    // The verdict for a corpse that cannot be raised: the classic disable, or under
+    // earned play the corpse run the readiness gates wait out.
+    inline Outcome CorpseRunOrDisable(Inputs const& in, std::vector<Member> const& members)
+    {
+        return in.corpseRunWhenUnrecoverable && !LeaderCorpse(members) ? Outcome::None
+                                                                        : Outcome::Disable;
+    }
 
     struct Result
     {
@@ -417,7 +432,7 @@ namespace DcRezDecision
                 r.targetIdx = PickTarget(members);
                 return r;
             }
-            r.outcome = Outcome::Disable;
+            r.outcome = CorpseRunOrDisable(in, members);
             r.reason = Reason::NoRezzer;
             return r;
         }
@@ -462,7 +477,7 @@ namespace DcRezDecision
         if (!in.partyEngaged && in.pendingSinceMs != 0 && in.timeoutMs != 0 &&
             in.nowMs - in.pendingSinceMs >= in.timeoutMs)
         {
-            r.outcome = Outcome::Disable;
+            r.outcome = CorpseRunOrDisable(in, members);
             r.reason = Reason::TimedOut;
             return r;
         }
