@@ -10,8 +10,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: portable-integration-${{ github.ref }}
-  cancel-in-progress: true
+  # A newer push or pull request update replaces a running check. A manual run
+  # gets its own queue, so neither cancels the other.
+  group: portable-integration-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
   integration:
