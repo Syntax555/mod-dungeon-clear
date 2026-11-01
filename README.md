@@ -37,10 +37,10 @@ roles and complete navigation data are required. They do not enter raids or
 heroics.
 
 Natural progression refuses teleports, free resurrection, artificial combat
-recovery, granted items and unaudited event or movement controllers. Required
-unsupported events need ordinary player interaction; optional ones may be
-skipped. Missing routes or prerequisites can stall a clear. Provisioned test
-parties and Pull Lab launches are unavailable in natural progression.
+recovery or forced boss aggro, granted items and unaudited event or movement
+controllers. Required unsupported events need ordinary player interaction;
+optional ones may be skipped. Missing routes or prerequisites can stall a clear.
+Provisioned test parties and Pull Lab launches are unavailable in natural progression.
 
 Blackfathom Deeps and Stratholme refuse autonomous recruitment because their
 movement/event controllers are unaudited. Other routes have key, item or event
@@ -72,7 +72,7 @@ for limits, disabled queue/recovery shortcuts and raid tactics.
 
 Maintained in [Syntax555/mod-dungeon-clear](https://github.com/Syntax555/mod-dungeon-clear),
 from [Jared Wright and contributors' upstream](https://github.com/jrad7/mod-dungeon-clear).
-The [imported upstream README](https://github.com/jrad7/mod-dungeon-clear/blob/7fb6ebdefb8038af2676c280214f8a15c843b347/README.md)
+The [imported upstream README](https://github.com/jrad7/mod-dungeon-clear/blob/db160a9fa372dbd97d51d7f59a7bbb85645edfef/README.md)
 describes the original project's broader tooling; the earned-play rules above
 apply to this fork's portable use.
 

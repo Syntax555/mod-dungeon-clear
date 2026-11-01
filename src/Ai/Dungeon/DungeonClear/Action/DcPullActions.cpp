@@ -208,39 +208,12 @@ namespace
         return std::max(DC_PULL_LEG_TIMEOUT_MS, budget);
     }
 
-    // Put the tank on a boss's threat list — ONE DIRECTION ONLY: the boss attacks
-    // the tank, never the tank attacks the boss.
-    //
-    // That asymmetry is the whole point and it is load-bearing. The obvious-looking
-    // other half — bot->Attack(boss) + ChangeEngine(BOT_STATE_COMBAT), which is what
-    // EngageDirect and the Black Morass driver do — gives the TANK a victim, and
-    // stock combat's MoveChase then drives it AT the boss. For Ghaz'an that means
-    // straight into the lake, with the party following. This is not theoretical: it
-    // is exactly what an earlier version of this did.
-    //
-    // So we only ever ask the CREATURE to come to US. Aggro alone flags the tank
-    // into combat, which is all the maneuver needs — the drag-back leg then owns the
-    // tank's movement at MOVEMENT_COMBAT priority and runs it home to the camp,
-    // outranking any chase stock combat may later decide on.
-    //
-    // PER-ENCOUNTER OPT-IN. The caller only reaches this when the boss's own
-    // registry row carries a positive forceAggroRange, which today is exactly one
-    // row. Forcing bypasses the boss's aggro logic — normal, tuned behaviour that
-    // should be left alone almost everywhere — so it is reserved for a boss that
-    // cannot be tagged the ordinary way at all. See BossPullback::forceAggroRange.
-    //
-    // Ghaz'an is that boss. His script walks him a waypoint lap and parks him on a
-    // platform which — along with the pipe leading to it — is MISSING from the
-    // extracted navmesh, and he does not reliably finish the lap, so he is often
-    // still out in the water when the party is ready. Either way there is no
-    // reachable spot inside his aggro bubble: natural aggro can never fire, and the
-    // tag leg could only burn its watchdog holding for it before the run stalled.
-    //
-    // Idempotent: no-ops once he is already in combat. Returns true when the boss
-    // is (now) engaged on us.
+    // Standalone force-aggro rows affect only the creature. Giving the tank a
+    // victim here would let stock MoveChase interrupt its retreat to the camp.
     bool DcForceBossAggroOnTank(Player* bot, Creature* boss)
     {
-        if (!bot || !boss || !boss->IsAlive())
+        // Earned pulls must use a real attack and the creature's native aggro rules.
+        if (DcEarnedPlay::Active() || !bot || !boss || !boss->IsAlive())
             return false;
 
         if (!boss->IsInCombat())
@@ -254,7 +227,14 @@ namespace
             boss->EngageWithTarget(bot);
             // ...and this makes his AI actually pick the tank up and come, rather
             // than merely holding threat while standing still.
-            if (boss->AI())
+            //
+            // Not when his script has switched combat movement off. AttackStart
+            // then only plants him (ScriptedAI::AttackStartNoMove -> MoveIdle),
+            // which cancels whatever path JustEngagedWith just started. Jeklik is
+            // that boss: her engage flies her down from the cave, and MoveIdle
+            // left her passive up there, never reaching the path end that turns
+            // her aggressive (tr-20261027-001452-1, ten minutes at her ledge).
+            if (boss->AI() && boss->IsCombatMovementAllowed())
                 boss->AI()->AttackStart(bot);
         }
 
@@ -1352,7 +1332,7 @@ bool DungeonClearPullAction::Execute(Event /*event*/)
                 pull.bossPullback
                     ? BossPullbackRegistry::Find(bot->GetMapId(), trash->GetEntry())
                     : nullptr;
-            if (forceRow && forceRow->forceAggroRange > 0.0f)
+            if (!DcEarnedPlay::Active() && forceRow && forceRow->forceAggroRange > 0.0f)
             {
                 float const toBoss = bot->GetExactDist(trash);
                 if (toBoss > forceRow->forceAggroRange)
@@ -2018,9 +1998,28 @@ namespace
             bool const aliveIdle = pulled && pulled->IsAlive() && !pulled->IsInCombat();
             // sameTarget compares against the OLD latch before we re-stamp it.
             bool const sameTarget = aliveIdle && pull.fizzleTarget == pull.pullTarget;
-            bool const handoff = DungeonClearMath::ShouldHandoffFizzledPull(
+            // A force-aggro boss is never handed off: the walk-in engage cannot
+            // start the fight the force exists to start (Jeklik is passive and
+            // out of line of sight on her ledge), so the hand-off only stalls the
+            // run. Its pull fizzles when trash flags the tank while it forms —
+            // the camp fight is then with the trash and the boss never hears of
+            // it (tr-20261027-025826-2, bats, twice). Re-forming retries the force.
+            BossPullback const* const forceRow = aliveIdle
+                ? BossPullbackRegistry::Find(bot->GetMapId(), pulled->GetEntry())
+                : nullptr;
+            bool const forced = !DcEarnedPlay::Active() && forceRow && forceRow->forceAggroRange > 0.0f;
+            if (forced)
+            {
+                DC_PULL_INFO("[DC:{}] pull-back: {} still idle after the camp fight "
+                             "({:.0f}% hp, {:.1f}yd) -> forcing it again on the next "
+                             "pull", bot->GetName(), pull.pullTarget.ToString(),
+                             pulled->GetHealthPct(), bot->GetExactDist(pulled));
+                pull.fizzleTarget = ObjectGuid::Empty;
+                pull.fizzleCount = 0;
+            }
+            bool const handoff = !forced && DungeonClearMath::ShouldHandoffFizzledPull(
                 aliveIdle, sameTarget, DC_PULL_FIZZLE_MAX, pull.fizzleCount);
-            if (aliveIdle)
+            if (aliveIdle && !forced)
             {
                 if (!sameTarget)
                     pull.fizzleTarget = pull.pullTarget;
