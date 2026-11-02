@@ -72,7 +72,7 @@ for limits, disabled queue/recovery shortcuts and raid tactics.
 
 Maintained in [Syntax555/mod-dungeon-clear](https://github.com/Syntax555/mod-dungeon-clear),
 from [Jared Wright and contributors' upstream](https://github.com/jrad7/mod-dungeon-clear).
-The [imported upstream README](https://github.com/jrad7/mod-dungeon-clear/blob/db160a9fa372dbd97d51d7f59a7bbb85645edfef/README.md)
+The [imported upstream README](https://github.com/jrad7/mod-dungeon-clear/blob/6f81199b987dd7919b3d4896bf1b6d5b9e63a169/README.md)
 describes the original project's broader tooling; the earned-play rules above
 apply to this fork's portable use.
 
