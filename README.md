@@ -79,7 +79,10 @@ apply to this fork's portable use.
 Read [AGENTS.md](AGENTS.md) and the assembly's
 [contribution workflow](https://github.com/Syntax555/mod-playerbots-portable/blob/main/CONTRIBUTING.md)
 before changing this fork. Portable integration CI checks relevant assembly
-fixtures; native builds and release integration run in the assembly.
+fixtures. The [unit test workflow](.github/workflows/unit-tests.yml) builds the
+`t/` suite against the assembly's pinned core and runs it with
+[`t/run_tests.sh`](t/run_tests.sh), which also works from a core checkout's
+`modules/mod-dungeon-clear`. Release builds run in the assembly.
 
 Copyright (C) 2026+ Jared Wright and contributors. Licensed under
 [AGPL-3.0-or-later](LICENSE), inherited from and linking against Playerbots.

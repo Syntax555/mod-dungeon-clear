@@ -1,0 +1,104 @@
+name: Unit tests
+
+# Builds the module's gtest suite (t/) against the assembly's pinned core and
+# other modules, then runs it with t/run_tests.sh. Only changes that can affect
+# the suite start it; a manual run can name the assembly branch to build against.
+on:
+  push:
+    branches: [master]
+    paths: &suite
+      - CMakeLists.txt
+      - mod-dungeon-clear.cmake
+      - src/**
+      - t/**
+      - .github/workflows/unit-tests.yml
+  pull_request:
+    paths: *suite
+  workflow_dispatch:
+    inputs:
+      portable-ref:
+        description: Assembly branch, tag or commit whose pinned core builds the suite
+        default: main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: unit-tests-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  unit-tests:
+    name: Build and run the unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    defaults:
+      run:
+        shell: bash
+        working-directory: portable
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 4G
+      # The core's precompiled headers are cacheable only with this sloppiness.
+      CCACHE_SLOPPINESS: pch_defines,time_macros,include_file_mtime,include_file_ctime
+    steps:
+      - name: Check out the module under test
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: module
+          persist-credentials: false
+
+      - name: Check out the portable assembly
+        uses: actions/checkout@v7
+        with:
+          repository: Syntax555/mod-playerbots-portable
+          ref: ${{ inputs.portable-ref || 'main' }}
+          path: portable
+          persist-credentials: false
+
+      - name: Install the core's build dependencies
+        run: >-
+          bash .github/scripts/install-native-dependencies.sh build-essential cmake ccache mold
+          libboost-all-dev libmysqlclient-dev libssl-dev libbz2-dev libreadline-dev libncurses-dev zlib1g-dev
+
+      - name: Prepare the assembly's pinned core and modules
+        run: cmake -P cmake/PrepareModules.cmake
+
+      - name: Use the current module with the pinned assembly
+        run: |
+          set -euo pipefail
+          target=.module-cache/prepared-core/modules/mod-dungeon-clear
+          test -d "$target"
+          rm -rf "$target"
+          mkdir -p "$target"
+          git -C ../module archive HEAD | tar -x -C "$target"
+
+      - name: Restore the compiler cache
+        id: ccache
+        uses: actions/cache/restore@v6
+        with:
+          path: .ccache
+          key: dungeon-clear-unit-tests-${{ github.sha }}
+          restore-keys: dungeon-clear-unit-tests-
+
+      # Release objects without debug information keep the build within the
+      # runner's disk; the compiler cache keeps later runs short.
+      - name: Build and run the unit tests
+        run: >-
+          bash .module-cache/prepared-core/modules/mod-dungeon-clear/t/run_tests.sh
+          -DCMAKE_BUILD_TYPE=Release -DTOOLS_BUILD=none
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          -DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=mold
+
+      # Saved after failing tests too, so the next run compiles only changes.
+      - name: Save the compiler cache
+        if: always() && steps.ccache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: .ccache
+          key: dungeon-clear-unit-tests-${{ github.sha }}
+
+      - name: Report the compiler cache
+        if: always()
+        run: ccache --show-stats
