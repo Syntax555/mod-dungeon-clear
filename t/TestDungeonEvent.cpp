@@ -205,16 +205,33 @@ TEST(DungeonEventAdvance, DefaultTimeoutUsedWhenStepHasNone)
 
 TEST(DungeonEventAdvance, EscortCreatureNeverTimesOut)
 {
-    // The escort's own dead-air watchdog owns liveness; Advance must NOT escalate
-    // a long-Running EscortCreature step to Failed even far past any timeout (else
-    // it would fire during the Disciple's 32.5s banish / the long ritual hold).
-    DungeonEvent ev = EventBuilder(43, 2, "e")
-                          .EscortCreature(3678, 0, 3654, 7)
+    // A legacy escort's own dead-air watchdog owns liveness; Advance must NOT
+    // escalate a long-Running EscortCreature step to Failed even far past any
+    // timeout (else it would fire during an escortee's banish or a long ritual).
+    DungeonEvent ev = EventBuilder(0, 2, "e")
+                          .EscortCreature(1, 0, 2, 0)
                           .Build();
     DungeonEventProgress p = Prog(2, 0, 0);
     EXPECT_EQ(DungeonEventExecutor::Advance(ev, p, StepResult::Running, 10u * 60u * 1000u, 30000),
               EventDriveOutcome::Running);
     EXPECT_EQ(p.stepIndex, 0u);  // still on the escort step
+}
+
+TEST(DungeonEventAdvance, NaralexEscortKeepsItsFiniteBudget)
+{
+    // Wailing Caverns' Disciple of Naralex is the exception. Its earned driver
+    // (DcNaralexEscort) leaves the walk, banish and ritual to the native SmartAI
+    // and has no dead-air watchdog, so a dead, missing or reset escort must end
+    // the attempt: Advance applies the authored 15-minute budget.
+    DungeonEvent ev = EventBuilder(43, 2, "e")
+                          .EscortCreature(3678, 0, 3654, 7)
+                          .Timeout(900000)
+                          .Build();
+    DungeonEventProgress p = Prog(2, 0, 0);
+    EXPECT_EQ(DungeonEventExecutor::Advance(ev, p, StepResult::Running, 10u * 60u * 1000u, 30000),
+              EventDriveOutcome::Running);
+    EXPECT_EQ(DungeonEventExecutor::Advance(ev, p, StepResult::Running, 15u * 60u * 1000u, 30000),
+              EventDriveOutcome::Stalled);
 }
 
 TEST(DungeonEventAdvance, RewindLoopReDoningStepZeroIsCaughtByForwardProgress)
@@ -280,8 +297,8 @@ TEST(DungeonEventAdvance, ForwardProgressWatchdogSpareEscortCreature)
     // EscortCreature owns its own liveness (see EscortCreatureNeverTimesOut); the
     // forward-progress watchdog must respect that exemption too, or a long escort
     // that legitimately sits on one step would be failed at 3x the step timeout.
-    DungeonEvent ev = EventBuilder(43, 3, "e")
-                          .EscortCreature(3678, 0, 3654, 7)
+    DungeonEvent ev = EventBuilder(0, 3, "e")
+                          .EscortCreature(1, 0, 2, 0)
                           .Build();
     DungeonEventProgress p = Prog(3, 0, 0);
     EXPECT_EQ(DungeonEventExecutor::Advance(ev, p, StepResult::Running, 10u * 60u * 1000u, 30000),
@@ -555,11 +572,12 @@ TEST(DungeonEventRegistryTest, ZulFarrakGahzrillaEventShape)
     EXPECT_TRUE(e->steps[2].engage);
 }
 
-// Blackrock Depths Ring of Law (map 230): a PERSISTENT anchored event that walks
-// the tank onto the centre trigger, ensures the encounter started (Custom
-// fallback), then holds dead-centre until TYPE_RING_OF_LAW (1) reaches DONE (3)
-// while the random waves + boss are fought reactively. NOT a ClearRadius/count
-// gate (those would false-complete in the empty-floor windows).
+// Blackrock Depths Ring of Law (map 230): a PERSISTENT anchored event driven by
+// one earned hook (DcRingOfLaw). It gathers the party inside the native trigger
+// volume, submits the ordinary area trigger, submits it again after a reset and
+// completes only when TYPE_RING_OF_LAW (1) reaches DONE; the waves and boss are
+// fought reactively. NOT a ClearRadius/count gate (those would false-complete in
+// the empty-floor windows).
 TEST(DungeonEventRegistryTest, BlackrockRingOfLawEventShape)
 {
     DungeonEvent const* e = DungeonEventRegistry::Find(230, 1);
@@ -569,28 +587,14 @@ TEST(DungeonEventRegistryTest, BlackrockRingOfLawEventShape)
     EXPECT_TRUE(e->persistent);
     EXPECT_TRUE(e->required);
 
-    ASSERT_EQ(e->steps.size(), 3u);
+    EXPECT_TRUE(e->stepsOwnMovement);  // the hook walks the party into the volume
 
-    // 1. settle on the arena centre (area trigger 1526 spot).
-    EXPECT_EQ(e->steps[0].kind, EventStepKind::MoveTo);
-    EXPECT_FLOAT_EQ(e->steps[0].x, 596.432f);
-    EXPECT_EQ(e->steps[0].instanceDataId, -1);  // plain MoveTo, no gate
-
-    // 2. ensure the encounter started (Custom -> EnsureRingStarted hook id 1).
-    EXPECT_EQ(e->steps[1].kind, EventStepKind::Custom);
-    EXPECT_EQ(e->steps[1].hookId, 1u);
-
-    // 3. garrison the centre until TYPE_RING_OF_LAW (1) reaches DONE (3); long
-    //    timeout for the boss fight. The garrison re-runs the SAME start hook
-    //    while it holds, because the state is not monotonic (npc_grimstone's
-    //    no-victim watchdog resets it to NOT_STARTED).
-    EXPECT_EQ(e->steps[2].kind, EventStepKind::MoveTo);
-    EXPECT_EQ(e->steps[2].instanceDataId, 1);    // TYPE_RING_OF_LAW
-    EXPECT_EQ(e->steps[2].instanceDataMin, 3u);  // EncounterState::DONE
-    EXPECT_EQ(e->steps[2].timeoutMs, 600000u);
-    EXPECT_EQ(e->steps[2].hookId, 1u);           // .WhileHolding(EnsureRingStarted)
-    EXPECT_FLOAT_EQ(e->steps[2].radius, e->steps[0].radius)
-        << "walk-in and hold must agree on where the centre is";
+    // One step: the hook owns the gather, the trigger and the wait for DONE, with
+    // a long timeout for the boss fight.
+    ASSERT_EQ(e->steps.size(), 1u);
+    EXPECT_EQ(e->steps[0].kind, EventStepKind::Custom);
+    EXPECT_EQ(e->steps[0].hookId, 1u);
+    EXPECT_EQ(e->steps[0].timeoutMs, 600000u);
 }
 
 // Blackrock Depths Shadowforge Lock (map 230 event 2): walk to the lever in the
@@ -878,8 +882,8 @@ TEST(DungeonEventRegistryTest, BlackrockLyceumBrazierEventShapes)
     EXPECT_EQ(n->steps[5].wantState, B::GO_STATE_LIT_OR_OPEN);
 }
 
-// Deadmines Defias Cannon: walk to the cannon, fire it (Custom hook 2 casts the
-// gunpowder spell at GO 16398), then hold until the Iron Clad Door (16397) opens.
+// Deadmines Defias Cannon: walk to the cannon, fire it with the party's own
+// gunpowder (GO 16398), then hold until the Iron Clad Door (16397) opens.
 TEST(DungeonEventRegistryTest, DeadminesCannonEventShape)
 {
     DungeonEvent const* e = DungeonEventRegistry::Find(36, 1);
@@ -889,27 +893,39 @@ TEST(DungeonEventRegistryTest, DeadminesCannonEventShape)
     EXPECT_TRUE(e->persistent);
     EXPECT_TRUE(e->required);
 
+    EXPECT_TRUE(e->stepsOwnMovement);  // the cannon driver walks to the chest and back
+
+    // Only the native door state completes the event, whatever step it is on.
+    EXPECT_EQ(e->completeGoEntry, 16397u);
+    EXPECT_EQ(e->completeGoState, 2u);  // GO_STATE_ACTIVE_ALTERNATIVE
+
     ASSERT_EQ(e->steps.size(), 3u);
 
     // 1. step onto the cannon.
     EXPECT_EQ(e->steps[0].kind, EventStepKind::MoveTo);
     EXPECT_FLOAT_EQ(e->steps[0].x, -107.56f);
 
-    // 2. fire it (Custom -> FireDefiasCannon hook id 2).
-    EXPECT_EQ(e->steps[1].kind, EventStepKind::Custom);
-    EXPECT_EQ(e->steps[1].hookId, 2u);
+    // 2. use the party's own Defias Gunpowder on it through the ordinary item
+    //    action (DcDefiasCannon loots the chest first when nobody carries any);
+    //    no hook grants the powder.
+    EXPECT_EQ(e->steps[1].kind, EventStepKind::UseItemOnGO);
+    EXPECT_EQ(e->steps[1].itemId, 5397u);
+    EXPECT_EQ(e->steps[1].spellId, 6250u);
+    EXPECT_EQ(e->steps[1].goEntry, 16398u);
+    EXPECT_EQ(e->steps[1].hookId, 0u);
+    EXPECT_EQ(e->steps[1].timeoutMs, 120000u);
 
-    // 3. hold until the Iron Clad Door opens (GO_STATE_ACTIVE_ALTERNATIVE).
+    // 3. hold until the Iron Clad Door opens.
     EXPECT_EQ(e->steps[2].kind, EventStepKind::WaitForGameObjectState);
     EXPECT_EQ(e->steps[2].goEntry, 16397u);
     EXPECT_EQ(e->steps[2].wantState, 2u);
-    EXPECT_EQ(e->steps[2].timeoutMs, 30000u);
+    EXPECT_EQ(e->steps[2].timeoutMs, 120000u);
 }
 
-// Wailing Caverns drop to Lord Serpentis: settle on the lip, then jump the
-// off-mesh gap onto Serpentis's shelf. Persistent (the drop is one-way; a rewind
-// would walk back to the now-unreachable lip).
-TEST(DungeonEventRegistryTest, WailingCavernsSerpentisDropEventShape)
+// Wailing Caverns walk to Lord Serpentis: backtrack over the ramp of native
+// patrol 381170 instead of jumping the off-mesh gap. Every leg is an ordinary
+// mesh walk (no Jump/DropInHole); persistent so a combat gap resumes the walk.
+TEST(DungeonEventRegistryTest, WailingCavernsWalkToSerpentisEventShape)
 {
     DungeonEvent const* e = DungeonEventRegistry::Find(43, 1);
     ASSERT_NE(e, nullptr);
@@ -917,27 +933,24 @@ TEST(DungeonEventRegistryTest, WailingCavernsSerpentisDropEventShape)
     EXPECT_EQ(e->orderIndex, 5u);  // shared with Serpentis (bit 5)
     EXPECT_TRUE(e->persistent);
     EXPECT_TRUE(e->required);
+    EXPECT_TRUE(e->stepsOwnMovement);
 
-    ASSERT_EQ(e->steps.size(), 2u);
-
-    // 1. settle on the jump lip.
-    EXPECT_EQ(e->steps[0].kind, EventStepKind::MoveTo);
-    EXPECT_FLOAT_EQ(e->steps[0].x, -290.65567f);
-    EXPECT_FLOAT_EQ(e->steps[0].radius, 3.0f);
-
-    // 2. leap onto the landing shelf.
-    EXPECT_EQ(e->steps[1].kind, EventStepKind::Jump);
-    EXPECT_FLOAT_EQ(e->steps[1].x, -285.45773f);
-    EXPECT_FLOAT_EQ(e->steps[1].y, 4.021016f);
-    EXPECT_FLOAT_EQ(e->steps[1].z, -63.919395f);
-    EXPECT_FLOAT_EQ(e->steps[1].radius, 5.0f);
+    ASSERT_EQ(e->steps.size(), 5u);
+    for (EventStep const& leg : e->steps)
+    {
+        EXPECT_EQ(leg.kind, EventStepKind::MoveTo);
+        EXPECT_FLOAT_EQ(leg.radius, 2.0f);
+        EXPECT_EQ(leg.timeoutMs, 120000u);
+    }
+    EXPECT_FLOAT_EQ(e->steps.front().x, -206.648f);
+    EXPECT_FLOAT_EQ(e->steps.back().x, -120.163f);
+    EXPECT_FLOAT_EQ(e->steps.back().y, -24.624f);
 }
 
-// Wailing Caverns return-fall (event 3): off Verdan's shelf down the narrow hole
-// to the lower caverns. Settle on the lip, then DropInHole — glide over the open
-// shaft mouth and MoveFall pure-vertical into the water. Persistent (the drop is
-// one-way; a rewind would walk back to the now-unreachable lip).
-TEST(DungeonEventRegistryTest, WailingCavernsReturnFallEventShape)
+// Wailing Caverns walk back to the lower caverns (event 3): the same ramp in the
+// other direction instead of the drop down Verdan's hole, ending where the
+// Disciple's escort (event 2) starts.
+TEST(DungeonEventRegistryTest, WailingCavernsWalkBackEventShape)
 {
     DungeonEvent const* e = DungeonEventRegistry::Find(43, 3);
     ASSERT_NE(e, nullptr);
@@ -945,24 +958,22 @@ TEST(DungeonEventRegistryTest, WailingCavernsReturnFallEventShape)
     EXPECT_EQ(e->orderIndex, 7u);  // after Verdan (6), before the escort (also 7)
     EXPECT_TRUE(e->persistent);
     EXPECT_TRUE(e->required);
+    EXPECT_TRUE(e->stepsOwnMovement);
 
-    ASSERT_EQ(e->steps.size(), 2u);
+    ASSERT_EQ(e->steps.size(), 5u);
+    for (EventStep const& leg : e->steps)
+    {
+        EXPECT_EQ(leg.kind, EventStepKind::MoveTo);
+        EXPECT_FLOAT_EQ(leg.radius, 2.0f);
+        EXPECT_EQ(leg.timeoutMs, 120000u);
+    }
 
-    // 1. settle on the lip (so stepIndex reaches 1, the persistence sticky).
-    EXPECT_EQ(e->steps[0].kind, EventStepKind::MoveTo);
-    EXPECT_FLOAT_EQ(e->steps[0].x, -55.89f);
-    EXPECT_FLOAT_EQ(e->steps[0].radius, 4.0f);
-
-    // 2. drop: x/y/z is the over-hole nudge target; landX/Y/Z the deep-floor
-    //    landing the leader falls onto and the followers teleport to.
-    EventStep const& drop = e->steps[1];
-    EXPECT_EQ(drop.kind, EventStepKind::DropInHole);
-    EXPECT_FLOAT_EQ(drop.x, -49.5f);
-    EXPECT_FLOAT_EQ(drop.y, 47.6f);
-    EXPECT_FLOAT_EQ(drop.z, -29.0f);
-    EXPECT_FLOAT_EQ(drop.landX, -49.5f);
-    EXPECT_FLOAT_EQ(drop.landY, 47.6f);
-    EXPECT_FLOAT_EQ(drop.landZ, -105.83f);
+    DungeonEvent const* escort = DungeonEventRegistry::Find(43, 2);
+    ASSERT_NE(escort, nullptr);
+    ASSERT_FALSE(escort->steps.empty());
+    EXPECT_FLOAT_EQ(e->steps.back().x, escort->steps.front().x);
+    EXPECT_FLOAT_EQ(e->steps.back().y, escort->steps.front().y);
+    EXPECT_FLOAT_EQ(e->steps.back().z, escort->steps.front().z);
 }
 
 // The Slave Pens (547) post-Mennu drop: a single TeleportParty step that
@@ -1313,45 +1324,49 @@ TEST(DungeonEventConditional, BloodFurnaceBroggokCellDoor)
 
 // Uldaman (70): the Altar of the Keepers — an ANCHORED event on roster objective
 // OBJ(1). Boss-nav delivers the tank into the hall; the event clears the live
-// trash (Stewards / Earthen), centres on the altar, fires the SEND_EVENT to
-// awaken the 4 stoned keepers, kills them, then waits for the temple door.
-// Persistent so the multi-keeper fight can't rewind it.
+// trash (Stewards / Earthen), centres on the altar, uses it through the ordinary
+// ritual (DcUldamanAltars) and holds through the native keeper death chain, then
+// waits for the temple door. NOT persistent: after a wipe the native encounter
+// resets and the objective must re-arrive and click again rather than stay sticky.
 TEST(DungeonEventAnchored, UldamanStoneKeepers)
 {
     DungeonEvent const* e = DungeonEventRegistry::Find(70, 2);
     ASSERT_NE(e, nullptr);
     EXPECT_EQ(e->activation, EventActivation::Anchored);
     EXPECT_TRUE(e->required);
-    EXPECT_TRUE(e->persistent);
+    EXPECT_FALSE(e->persistent);
+    EXPECT_TRUE(e->stepsOwnMovement);  // the ritual channel must not be held
 
-    ASSERT_EQ(e->steps.size(), 5u);
+    ASSERT_EQ(e->steps.size(), 4u);
     EXPECT_EQ(e->steps[0].kind, EventStepKind::ClearRadius);  // clear live hall trash
     EXPECT_TRUE(e->steps[0].engage);
     EXPECT_EQ(e->steps[1].kind, EventStepKind::MoveTo);
-    EXPECT_EQ(e->steps[2].kind, EventStepKind::CastSpell);
-    EXPECT_EQ(e->steps[2].spellId, 11568u);              // Altar of The Keepers SEND_EVENT
-    EXPECT_EQ(e->steps[3].kind, EventStepKind::KillCreature);
-    EXPECT_EQ(e->steps[3].creatureEntry, 4857u);         // Stone Keeper
-    EXPECT_FALSE(e->steps[3].engage);                    // plain gate (party auto-aggros)
-    EXPECT_EQ(e->steps[4].kind, EventStepKind::WaitForGameObjectState);
-    EXPECT_EQ(e->steps[4].goEntry, 124367u);             // temple door
-    EXPECT_EQ(e->steps[4].wantState, 0u);                // GO_STATE_ACTIVE (open)
+    EXPECT_EQ(e->steps[2].kind, EventStepKind::UseGameObject);
+    EXPECT_EQ(e->steps[2].goEntry, 130511u);             // Altar of The Keepers
+    EXPECT_EQ(e->steps[2].timeoutMs, 120000u);           // the keeper fight
+    EXPECT_EQ(e->steps[3].kind, EventStepKind::WaitForGameObjectState);
+    EXPECT_EQ(e->steps[3].goEntry, 124367u);             // temple door
+    EXPECT_EQ(e->steps[3].wantState, 0u);                // GO_STATE_ACTIVE (open)
 }
 
 // Uldaman (70): the Altar of Archaedas — an ANCHORED event on roster objective
-// OBJ(2). Boss-nav delivers the tank onto the altar, this fires its SEND_EVENT to
-// wake the stoned final boss, and the boss pull then kills him.
+// OBJ(2). Boss-nav delivers the tank onto the altar; the ordinary ritual wakes
+// the stoned final boss and the boss pull then kills him. Only his native DONE
+// completes the step.
 TEST(DungeonEventAnchored, UldamanArchaedasAltar)
 {
     DungeonEvent const* e = DungeonEventRegistry::Find(70, 3);
     ASSERT_NE(e, nullptr);
     EXPECT_EQ(e->activation, EventActivation::Anchored);
     EXPECT_TRUE(e->required);
+    EXPECT_FALSE(e->persistent);
+    EXPECT_TRUE(e->stepsOwnMovement);
 
     ASSERT_EQ(e->steps.size(), 2u);
     EXPECT_EQ(e->steps[0].kind, EventStepKind::MoveTo);
-    EXPECT_EQ(e->steps[1].kind, EventStepKind::CastSpell);
-    EXPECT_EQ(e->steps[1].spellId, 10340u);             // Altar of Archaedas SEND_EVENT
+    EXPECT_EQ(e->steps[1].kind, EventStepKind::UseGameObject);
+    EXPECT_EQ(e->steps[1].goEntry, 133234u);            // Altar of Archaedas
+    EXPECT_EQ(e->steps[1].timeoutMs, 180000u);
 }
 
 // Garrison MoveTo (MoveToHoldUntilSpawn): a MoveTo step carrying a spawn-gate

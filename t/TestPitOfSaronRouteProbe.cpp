@@ -214,16 +214,20 @@ TEST(PitOfSaronRouteProbe, GateStandPointsAreInsideTheirOwnSpheresAndTheLedgeIsO
         << "the arena stand point is outside half the boss's vertical leash band";
 }
 
-// The staging point the ARM state holds the party on must be clear of gate 1's
-// sphere on every bearing, or the hold is not a hold at all.
-TEST(PitOfSaronRouteProbe, TheArmStagingPointIsClearOfGateOne)
+// The staging point the ARM state holds the party on sits on gate 1's rim by
+// design (STAGE_X in DungeonEventTables.h): the driver forges the trigger, so
+// standing inside the sphere early consumes nothing, and the southern plain keeps
+// the resume line clear of the shoulder. Pin that trade — on the rim, never in
+// the middle — so moving the hold toward the gate stays a deliberate decision.
+TEST(PitOfSaronRouteProbe, TheArmStagingPointStaysOnTheRimOfGateOne)
 {
     float const d = Dist3(STAGE_X, STAGE_Y, STAGE_Z, AT_WARN_1_X, AT_WARN_1_Y, AT_WARN_1_Z);
-    EXPECT_GT(d, AT_WARN_1_R + STAGE_LEASH + 20.0f)
-        << "the ARM staging point is only " << d << "yd from areatrigger " << AREATRIGGER_WARN_1
-        << " (radius " << AT_WARN_1_R
-        << "). The whole point of that state is to keep the party OUT of the ambush trigger for"
-           " the 85-100s the Krick outro needs to fly the orchestrator into position.";
+    EXPECT_GT(d, AT_WARN_1_R - 1.0f)
+        << "the ARM staging point is " << d << "yd from areatrigger " << AREATRIGGER_WARN_1
+        << "'s centre (radius " << AT_WARN_1_R
+        << "): more than a yard inside the sphere is no longer the rim the hold was"
+           " checked on. If wave 1 reaches the hold, move it south-west along the same"
+           " bearing instead.";
 }
 
 // Every authored anchor must be somewhere a bot can actually stand.

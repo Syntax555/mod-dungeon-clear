@@ -72,9 +72,15 @@ namespace
     //     KillCreatureEngage kill-gates, one continuous fight at a fixed spot, no
     //     WaitForSpawn to false-complete across a gap — a restart-from-0 re-evaluates
     //     correctly (StratholmeEvents.cpp:29-35).
+    //   - Uldaman (70) event 2 "Awaken the Stone Keepers": the earned altar driver
+    //     (DcUldamanAltars) reads the native encounter before it clicks, so a
+    //     restart re-clears an empty hall, re-centres and resumes the running
+    //     ritual instead of repeating it. After a wipe the encounter resets and
+    //     the objective must re-arrive and click again; persistence would leave it
+    //     sticky (UldamanEvents.cpp, the altar comment).
     bool IsNonPersistentWhitelisted(uint32 mapId, uint32 eventId)
     {
-        return mapId == 329 && eventId == 5;
+        return (mapId == 329 && eventId == 5) || (mapId == 70 && eventId == 2);
     }
 
     // An "arrival" step forces the tank to a specific spot before it can report
@@ -608,10 +614,14 @@ TEST(DungeonEventIntegrityTest, AnchoredStepsOwnMovementEventsCanLatchActive)
     // IsPersistentAnchoredEventActive was false for its whole life, its 34.4yd
     // walk-in left a 6.0yd arriveRadius, and 6 of 10 runs of tp-20260907-140341-2
     // stalled on the anchor while Advance and the hook fought over the tank.
+    //
+    // The latch only exists for PERSISTENT events (IsPersistentAnchoredEventActive
+    // returns false for the rest whatever their front step); a non-persistent
+    // stepsOwnMovement event is held to the stricter rule in the test below.
     for (DungeonEvent const& ev : DungeonEventRegistry::AllEvents())
     {
         if (ev.activation != EventActivation::Anchored || !ev.stepsOwnMovement ||
-            ev.steps.empty())
+            !ev.persistent || ev.steps.empty())
             continue;
 
         EventStep const& front = ev.steps.front();
@@ -629,6 +639,44 @@ TEST(DungeonEventIntegrityTest, AnchoredStepsOwnMovementEventsCanLatchActive)
                " plain arriveRadius test, and Advance fights the event for the tank"
                " until the step times out. Lead with a MoveTo, or make the front step"
                " a Custom driver hook.";
+    }
+}
+
+// --- F1c: a non-persistent mover never walks off its own anchor ------------
+
+TEST(DungeonEventIntegrityTest, NonPersistentStepsOwnMovementEventsStayInsideTheirAnchor)
+{
+    // Without persistence nothing latches the event ACTIVE, so it is driven only
+    // while the tank stands inside its objective's arriveRadius. Its own walks
+    // must therefore end inside that radius, or the trigger drops the event the
+    // moment a step moves the tank and Advance fights it for the tank (the F1b
+    // failure, with no latch to fall back on). The earned Uldaman altars are this
+    // shape: each walks to an altar at the centre of its own objective.
+    for (DungeonEvent const& ev : DungeonEventRegistry::AllEvents())
+    {
+        if (ev.activation != EventActivation::Anchored || !ev.stepsOwnMovement || ev.persistent)
+            continue;
+
+        DungeonBossInfo const* anchor = nullptr;
+        for (BossRosterPatch const& patch : BossRosterRegistry::AllPatches())
+            if (patch.mapId == ev.mapId)
+                for (DungeonBossInfo const& e : patch.add)
+                    if (e.kind == DungeonAnchorKind::Objective && e.eventId == ev.id)
+                        anchor = &e;
+        ASSERT_NE(anchor, nullptr) << "anchored event map " << ev.mapId << " id " << ev.id
+                                   << " (" << ev.name << ") has no objective";
+
+        for (EventStep const& step : ev.steps)
+        {
+            if (step.kind != EventStepKind::MoveTo)
+                continue;
+            float const dx = step.x - anchor->x, dy = step.y - anchor->y, dz = step.z - anchor->z;
+            EXPECT_LE(std::sqrt(dx * dx + dy * dy + dz * dz) + step.radius, anchor->arriveRadius)
+                << "non-persistent event map " << ev.mapId << " id " << ev.id << " (" << ev.name
+                << ") walks the tank to (" << step.x << "," << step.y << "," << step.z
+                << ") outside its objective's " << anchor->arriveRadius
+                << "yd arriveRadius. Make it .Persistent() or keep its walks on the anchor.";
+        }
     }
 }
 
@@ -1203,36 +1251,28 @@ TEST(DungeonEventIntegrityTest, ShatteredHallsGauntletIsFoughtInBounds)
     }
 }
 
-// The BRD Ring of Law, pinned to the two properties tr-20260808-150405-10 broke
-// on. Both look like tuning and are not.
-TEST(DungeonEventIntegrityTest, RingOfLawGarrisonsTheCentreAndCanRestartItself)
+// The BRD Ring of Law under earned play. TYPE_RING_OF_LAW is not monotonic:
+// npc_grimstone's 30s no-victim watchdog and a wipe put it back to NOT_STARTED,
+// and nothing restarts it unless the driver is still running. One hook
+// (DcRingOfLaw) therefore owns the whole event: it gathers the party inside the
+// native trigger volume, submits the ordinary area trigger again whenever the
+// state is NOT_STARTED, and completes only on DONE.
+TEST(DungeonEventIntegrityTest, RingOfLawIsDrivenByOneRestartingHook)
 {
     DungeonEvent const* ev = DungeonEventRegistry::Find(/*map*/ 230, /*eventId*/ 1);
     ASSERT_NE(ev, nullptr) << "Blackrock Depths (230) event 1 (Ring of Law) is missing";
 
-    EventStep const* hold = nullptr;
-    for (EventStep const& s : ev->steps)
-        if (s.kind == EventStepKind::MoveTo && s.instanceDataId >= 0)
-            hold = &s;
-    ASSERT_NE(hold, nullptr) << "the Ring of Law must hold on TYPE_RING_OF_LAW";
+    ASSERT_EQ(ev->steps.size(), 1u)
+        << "a step before or after the hook would latch Done while Grimstone can still reset";
+    EventStep const& drive = ev->steps.front();
+    EXPECT_EQ(drive.kind, EventStepKind::Custom);
+    EXPECT_TRUE(ObjectiveHookRegistry::Has(drive.hookId))
+        << "the Ring of Law references unregistered hook " << drive.hookId;
 
-    // A garrison radius is a LEASH, not a dead band. At 10yd the tank simply kept
-    // wherever the last wave died — 9.7yd out toward the mob gate, never
-    // re-centring, for the rest of the run.
-    EXPECT_LE(hold->radius, 5.0f)
-        << "the arena garrison must actually re-centre the tank between waves;"
-           " a radius this wide is a dead band the tank parks inside";
-
-    // TYPE_RING_OF_LAW is not monotonic: npc_grimstone's 30s no-victim watchdog
-    // SetData(FAIL)s it back to NOT_STARTED and despawns Grimstone and every
-    // summon. Without a hook running inside the hold, nothing ever notices — the
-    // Custom step that started it latched Done and the areatrigger relay is edge-
-    // triggered on a volume the party is standing in.
-    EXPECT_NE(hold->hookId, 0u)
-        << "the hold must re-run the start hook (.WhileHolding) or a Grimstone-side"
-           " reset stalls the party in an empty arena until the step times out";
-    EXPECT_TRUE(ObjectiveHookRegistry::Has(hold->hookId))
-        << "the Ring of Law hold references unregistered hook " << hold->hookId;
+    // Followers gather through DcRingOfLaw::Follow only while the event is latched
+    // ACTIVE, which needs a persistent event; the hook walks the party itself.
+    EXPECT_TRUE(ev->persistent);
+    EXPECT_TRUE(ev->stepsOwnMovement);
 }
 
 // The Black Morass wave driver, pinned to its exact shape. Every one of these
@@ -1462,6 +1502,25 @@ TEST(DungeonEventIntegrityTest, StepsOwnMovementIsConfinedToVettedEvents)
         // Karazhan "Climb out from under the Guardian's Library": hook 65 teleports
         // the party back up; the per-tick hold has no anchor to hold it at.
         {532, 4},
+        // Earned-play drivers (natural progression). Each walks the party itself
+        // on checked mesh legs or through an ordinary interaction, and the
+        // per-tick hold would cancel that movement or interrupt the channel.
+        // Deadmines cannon: DcDefiasCannon walks to the gunpowder chest and back.
+        {36, 1},
+        // Wailing Caverns: DcWailingCaverns walks each ramp leg of the routes to
+        // Serpentis and back down, and DcNaralexEscort follows the Disciple.
+        {43, 1},
+        {43, 2},
+        {43, 3},
+        // Uldaman altars: DcUldamanAltars approaches each altar and channels the
+        // native five-second ritual, which the hold would interrupt.
+        {70, 2},
+        {70, 3},
+        // Zul'Farrak: hook 5 walks into Zum'rah's native area trigger.
+        {209, 3},
+        // Blackrock Depths Ring of Law: hook 1 gathers the party inside the
+        // native trigger volume before it submits the trigger.
+        {230, 1},
     };
 
     for (DungeonEvent const& ev : DungeonEventRegistry::AllEvents())
@@ -1581,11 +1640,10 @@ TEST(DungeonEventIntegrityTest, EveryAuthoredObjectiveHookIdIsRegistered)
 {
     struct Expected { uint32 id; char const* what; };
     constexpr Expected kHooks[] = {
-        { 1, "BRD Ring of Law — EnsureRingStarted" },
-        { 2, "Deadmines — FireDefiasCannon" },
+        { 1, "BRD Ring of Law — EnsureRingStarted (DcRingOfLaw)" },
         { 3, "Old Hillsbrad — GrantIncendiaryBombs" },
         { 4, "The Mechanar — GrantCacheKeyAndLoot" },
-        { 5, "ZulFarrak — WakeZumrah" },
+        { 5, "ZulFarrak — WakeZumrah (native area trigger)" },
         { 6, "Arcatraz — DriveMellicharWaves" },
         { 7, "Sethekk Halls — DriveAnzuSummon" },
         { 8, "Black Morass — DriveBlackMorassEvent (BlackMorassDriver.cpp)" },
@@ -1615,6 +1673,12 @@ TEST(DungeonEventIntegrityTest, EveryAuthoredObjectiveHookIdIsRegistered)
     // any log a reader still consults.
     EXPECT_FALSE(ObjectiveHookRegistry::Has(11))
         << "hook id 11 is RETIRED (old BmPullDrainers) and must stay unused";
+
+    // 2 (FireDefiasCannon) granted the gunpowder and fired the cannon for the
+    // party. The Deadmines event now uses the party's own powder through the
+    // ordinary item action (DcDefiasCannon), so the id stays unused.
+    EXPECT_FALSE(ObjectiveHookRegistry::Has(2))
+        << "hook id 2 is RETIRED (old FireDefiasCannon) and must stay unused";
 }
 
 // --- Utgarde Keep (574): the forge masters must be swept ONE AT A TIME -----
@@ -2364,6 +2428,11 @@ TEST(DungeonEventIntegrityTest, PullOwningEventsAreVetted)
         // drag-back camp would be stamped off the edge or on another island, and a
         // scout-lagged tank is fifteen yards of rim nobody can stand on.
         {578, 9},
+        // Zul'Farrak "Wake Witch Doctor Zum'rah" (earned play). The leg is a walk
+        // onto his native area trigger, 3yd off his spawn while he is still
+        // friendly, not a pack to pull: a scout-lagged tank or a drag-back camp
+        // would keep the party away from the trigger the event exists to reach.
+        {209, 3},
     };
 
     for (DungeonEvent const& ev : DungeonEventRegistry::AllEvents())
