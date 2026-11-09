@@ -6,6 +6,7 @@
 #include "DcEarnedPlay.h"
 #include "TestRun/DcTestRunManager.h"
 
+#include <algorithm>
 #include <ctime>
 #include <fstream>
 #include <limits>
@@ -598,6 +599,26 @@ void DcTestRunManager::OnRunDisabled(Player* leader, std::string const& reason)
             job->OnRunDisabled(reason);
             return;
         }
+}
+
+void DcTestRunManager::OnLoot(Player* looter, DcTestRunRecord::LootEntry const& entry)
+{
+    if (!looter)
+        return;
+    ObjectGuid const guid = looter->GetGUID();
+
+    std::lock_guard<std::mutex> lock(_runsMutex);
+    for (auto const& job : _runs)
+    {
+        if (!job->IsMonitoring())
+            continue;
+        std::vector<ObjectGuid> const members = job->BotGuids();
+        if (std::find(members.begin(), members.end(), guid) != members.end())
+        {
+            job->OnLoot(entry);
+            return;
+        }
+    }
 }
 
 void DcTestRunManager::OnStatusPayload(ObjectGuid tank, std::string const& payload)

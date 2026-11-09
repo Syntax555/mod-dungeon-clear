@@ -29,6 +29,10 @@ progress and `.dc bosses` lists objectives. `.dc skip` advances the objective
 list; it does not open doors or award encounter credit. The tank driving the
 clear must be under bot control, including SelfBot.
 
+After the final objective, the run waits up to 60 seconds for open loot rolls
+and nearby boss drops belonging to the group. Ordinary loot eligibility and
+distribution still apply.
+
 Autonomous parties recruit five nearby same-faction random bots: tank, healer
 and three damage dealers. Each member needs its own earned era, level band and
 native entry eligibility. Controlled altbots, SelfBot characters and player
@@ -72,7 +76,7 @@ for limits, disabled queue/recovery shortcuts and raid tactics.
 
 Maintained in [Syntax555/mod-dungeon-clear](https://github.com/Syntax555/mod-dungeon-clear),
 from [Jared Wright and contributors' upstream](https://github.com/jrad7/mod-dungeon-clear).
-The [imported upstream README](https://github.com/jrad7/mod-dungeon-clear/blob/6f81199b987dd7919b3d4896bf1b6d5b9e63a169/README.md)
+The [imported upstream README](https://github.com/jrad7/mod-dungeon-clear/blob/484c802b2f4534a935b7d20cbb29e27d72d388e2/README.md)
 describes the original project's broader tooling; the earned-play rules above
 apply to this fork's portable use.
 
